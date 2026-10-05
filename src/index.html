@@ -92,7 +92,19 @@
       <div class="pane-head">
         <span class="title" data-i18n="pane.rx">接收区</span>
         <span class="badge" id="rxBadge">0</span>
+
+        <div class="seg-mini" id="rxView">
+          <button data-view="text" class="on" data-i18n="rx.viewText">文本</button>
+          <button data-view="chart" data-i18n="rx.viewChart">曲线</button>
+        </div>
+
+        <span class="rec-dot" id="recDot" hidden></span>
+        <span class="rec-info" id="recInfo" hidden></span>
+
         <span class="spacer"></span>
+        <button class="mini-btn icon rec-btn" id="btnRecord" data-i18n-title="tip.record">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+        </button>
         <button class="mini-btn icon" id="btnBottom" data-i18n-title="tip.bottom">
           <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>
         </button>
@@ -104,8 +116,10 @@
         </button>
       </div>
 
-      <div class="log-wrap">
+      <div class="log-wrap" id="logWrap">
         <div id="log"></div>
+        <canvas id="chart" hidden></canvas>
+        <div class="chart-tip" id="chartTip" hidden data-i18n="chart.tip">自动从每行提取 name=123 画曲线，最多 6 条</div>
         <div class="empty" id="logEmpty">
           <div class="box">
             <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h2l1.5-3 2 6 1.5-3h5"/></svg>
@@ -204,6 +218,44 @@
     <span class="sb" id="sbPort" data-i18n="sb.idle">未连接</span>
     <button class="mini-btn" id="btnResetStat" data-i18n="sb.reset">清空计数</button>
     <span class="brand" id="brand">大肥鱼串口助手 · MYX</span>
+  </div>
+</div>
+
+<!-- ===================== 长时记录 ===================== -->
+<div class="modal-mask" id="recModal">
+  <div class="modal rec-modal">
+    <div class="pane-head">
+      <span class="title" data-i18n="rec.title">长时记录</span>
+      <span class="spacer"></span>
+      <button class="mini-btn" id="btnRecClose" data-i18n="tool.close">关闭</button>
+    </div>
+    <div class="rec-body">
+      <div class="fld-line">
+        <span class="lbl" data-i18n="rec.dir">保存目录</span>
+        <input class="field mono" id="recDir" readonly data-i18n-ph="rec.dirPh">
+        <button class="mini-btn" id="btnRecPick" data-i18n="rec.browse">浏览</button>
+      </div>
+      <div class="fld-line">
+        <span class="lbl" data-i18n="rec.base">文件名前缀</span>
+        <input class="field mono" id="recBase" value="serial" spellcheck="false">
+        <span class="hint" data-i18n="rec.baseHint">→ serial_001.txt</span>
+      </div>
+      <div class="fld-line">
+        <span class="lbl" data-i18n="rec.split">分文件大小</span>
+        <input class="field num" id="recMaxMB" type="number" min="1" max="1024" value="8">
+        <span class="hint">MB</span>
+      </div>
+      <label class="chk-line">
+        <input type="checkbox" id="recAddTs" checked>
+        <span data-i18n="rec.addTs">每行前加本地时间戳</span>
+      </label>
+      <div class="rec-note" data-i18n="rec.note">记录模式下数据在后台直接写盘，不经过界面 —— 跑一整天内存也不会涨。</div>
+      <div class="rec-stat" id="recStat" hidden></div>
+    </div>
+    <div class="modal-foot">
+      <span class="spacer"></span>
+      <button class="mini-btn primary" id="btnRecToggle" data-i18n="rec.start">开始记录</button>
+    </div>
   </div>
 </div>
 
@@ -311,6 +363,7 @@
 <div id="loading"><div class="box"><div class="ring"></div></div></div>
 
 <script src="i18n.js"></script>
+<script src="chart.js"></script>
 <script src="tauri-bridge.js"></script>
 <script src="app.js"></script>
 </body>

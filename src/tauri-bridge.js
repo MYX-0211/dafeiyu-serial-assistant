@@ -59,6 +59,14 @@
     onPeer: function (cb) { return on('link:peer', cb); },
     onPortsChanged: function (cb) { return on('link:ports-changed', cb); },
 
+    /* ---------- 长时记录 ---------- */
+    recordStart: function (opts) { return invoke('record_start', { opts: opts }); },
+    recordStop: function () { return invoke('record_stop'); },
+    recordStatus: function () { return invoke('record_status'); },
+    pickFolder: function (defaultDir) {
+      return invoke('pick_folder', { defaultDir: defaultDir || null });
+    },
+
     /* ---------- 文件 / 系统 ---------- */
     saveFile: function (payload) {
       return invoke('save_file', { payload: payload });

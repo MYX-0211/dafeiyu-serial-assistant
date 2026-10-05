@@ -388,6 +388,69 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
 .tool-out b { color: var(--accent); font-weight: 600; }
 .tool-out .hl { color: var(--ok); }
 
+/* --------------------------- 视图切换 / 记录 ---------------------------- */
+.seg-mini {
+  display: inline-flex; gap: 2px; padding: 2px; border-radius: 7px;
+  background: var(--surface-2); flex: none;
+}
+.seg-mini button {
+  height: 19px; padding: 0 9px; border: none; border-radius: 5px; cursor: pointer;
+  background: transparent; color: var(--text-dim); font-size: 11px;
+  transition: color .18s var(--ease), background .18s var(--ease);
+}
+.seg-mini button:hover { color: var(--text); }
+.seg-mini button.on {
+  color: var(--text); background: #fff; font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .1);
+}
+
+.rec-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none; background: #D9534F;
+  box-shadow: 0 0 0 3px rgba(217, 83, 79, .18);
+  animation: recPulse 1.6s ease-in-out infinite;
+}
+@keyframes recPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}
+.rec-info {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  white-space: nowrap;
+}
+.rec-btn.on { color: #D9534F; border-color: rgba(217, 83, 79, .35); }
+.rec-btn.on svg { fill: currentColor; }
+
+#chart {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block;
+}
+.chart-tip {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-size: 11.5px; color: var(--text-faint); pointer-events: none;
+  text-align: center; max-width: 70%;
+}
+
+/* ----------------------------- 记录弹窗 --------------------------------- */
+.modal.rec-modal { width: min(460px, 92vw); }
+.rec-body { padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 12px; }
+.rec-body .fld-line { display: flex; align-items: center; gap: 9px; }
+.rec-body .fld-line .lbl { width: 74px; flex: none; font-size: 12.5px; color: var(--text-dim); }
+.rec-body .fld-line .field { flex: 1; min-width: 0; }
+.rec-body .fld-line .field.num { flex: none; width: 74px; text-align: center; }
+.rec-body .chk-line {
+  display: flex; align-items: center; gap: 7px; font-size: 12.5px;
+  color: var(--text-dim); cursor: pointer;
+}
+.rec-note {
+  font-size: 11.5px; color: var(--text-faint); line-height: 1.6;
+  padding: 9px 11px; border-radius: 8px; background: var(--surface-2);
+}
+.rec-stat {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-dim);
+  padding: 9px 11px; border-radius: 8px; line-height: 1.7;
+  background: var(--log-bg); box-shadow: inset 0 0 0 1px var(--line);
+}
+.rec-stat b { color: var(--accent); }
+
 /* ----------------------------- 关于窗口 -------------------------------- */
 .modal.about-modal { width: min(392px, 88vw); }
 

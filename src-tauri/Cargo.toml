@@ -1,6 +1,6 @@
 [package]
 name = "dafeiyu-serial-assistant"
-version = "1.0.0"
+version = "2.1.0"
 description = "大肥鱼串口助手 — 串口 / TCP / UDP 调试工具"
 authors = ["MYX"]
 edition = "2021"

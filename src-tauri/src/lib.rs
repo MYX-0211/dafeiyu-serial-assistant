@@ -7,12 +7,14 @@
 // ==========================================================================
 
 use serde::{Deserialize, Serialize};
-use std::io::{ErrorKind, Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{BufWriter, ErrorKind, Read, Write};
+use std::path::{Path, PathBuf};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 // ==========================================================================
@@ -98,12 +100,176 @@ struct Active {
 #[derive(Default)]
 struct AppState {
     active: Mutex<Option<Active>>,
+    /// 长时记录器（可选）：收到数据时直接落盘，不经过前端 DOM
+    recorder: Arc<Mutex<Option<Recorder>>>,
 }
 
 impl AppState {
     fn take(&self) -> Option<Active> {
         self.active.lock().unwrap().take()
     }
+}
+
+// ==========================================================================
+//  长时记录器
+//  --------------------------------------------------------------------------
+//  为什么放在 Rust 侧：串口助手原来跑久了会卡，是因为每条数据都要进 DOM。
+//  长时记录模式下数据直接写文件（BufWriter 缓冲），前端只是旁路看一眼，
+//  内存占用恒定，跑一整天也不涨。
+// ==========================================================================
+
+struct Recorder {
+    file: BufWriter<File>,
+    dir: PathBuf,
+    base: String,
+    max_bytes: u64,
+    written: u64,
+    index: u32,
+    add_ts: bool,
+    tz_offset_min: i64,
+    /// 跨 chunk 的行缓冲：串口数据是按块来的，一行可能被拆成两块
+    line_buf: Vec<u8>,
+    started_at: SystemTime,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecordStats {
+    active: bool,
+    dir: String,
+    file_name: String,
+    files: u32,
+    bytes: u64,
+    elapsed_secs: u64,
+}
+
+impl Recorder {
+    fn open_new(dir: &Path, base: &str, index: u32) -> std::io::Result<(BufWriter<File>, String)> {
+        let name = format!("{}_{:03}.txt", base, index);
+        let path = dir.join(&name);
+        let f = OpenOptions::new().create(true).write(true).truncate(true).open(&path)?;
+        Ok((BufWriter::with_capacity(64 * 1024, f), name))
+    }
+
+    fn new(
+        dir: PathBuf,
+        base: String,
+        max_bytes: u64,
+        add_ts: bool,
+        tz_offset_min: i64,
+    ) -> std::io::Result<Self> {
+        std::fs::create_dir_all(&dir)?;
+        let (file, _name) = Self::open_new(&dir, &base, 1)?;
+        Ok(Self {
+            file,
+            dir,
+            base,
+            max_bytes: if max_bytes == 0 { 8 * 1024 * 1024 } else { max_bytes },
+            written: 0,
+            index: 1,
+            add_ts,
+            tz_offset_min,
+            line_buf: Vec::new(),
+            started_at: SystemTime::now(),
+        })
+    }
+
+    fn current_name(&self) -> String {
+        format!("{}_{:03}.txt", self.base, self.index)
+    }
+
+    /// 落盘一段原始字节；需要时间戳时按行切分，跨块的行会暂存到下次
+    fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
+        if !self.add_ts {
+            return self.raw_write(data);
+        }
+        self.line_buf.extend_from_slice(data);
+        loop {
+            let pos = match self.line_buf.iter().position(|&b| b == b'\n') {
+                Some(p) => p,
+                None => break,
+            };
+            let line: Vec<u8> = self.line_buf.drain(..=pos).collect();
+            let ts = format!("[{}] ", local_time_str(self.tz_offset_min));
+            self.raw_write(ts.as_bytes())?;
+            self.raw_write(&line)?;
+        }
+        Ok(())
+    }
+
+    fn raw_write(&mut self, data: &[u8]) -> std::io::Result<()> {
+        if data.is_empty() {
+            return Ok(());
+        }
+        // 写之前判断要不要切文件
+        if self.written > 0 && self.written + data.len() as u64 > self.max_bytes {
+            self.file.flush()?;
+            self.index += 1;
+            let (f, _) = Self::open_new(&self.dir, &self.base, self.index)?;
+            self.file = f;
+            self.written = 0;
+        }
+        self.file.write_all(data)?;
+        self.written += data.len() as u64;
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.add_ts && !self.line_buf.is_empty() {
+            // 收尾：最后没换行的那段也要落盘
+            let rest = std::mem::take(&mut self.line_buf);
+            if !rest.is_empty() {
+                let ts = format!("[{}] ", local_time_str(self.tz_offset_min));
+                self.raw_write(ts.as_bytes())?;
+                self.raw_write(&rest)?;
+            }
+        }
+        self.file.flush()
+    }
+
+    fn stats(&self) -> RecordStats {
+        let elapsed = self
+            .started_at
+            .elapsed()
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        RecordStats {
+            active: true,
+            dir: self.dir.to_string_lossy().to_string(),
+            file_name: self.current_name(),
+            files: self.index,
+            bytes: self.written,
+            elapsed_secs: elapsed,
+        }
+    }
+}
+
+/// 把 Unix 秒转成「年月日 时分秒.毫秒」，不引第三方库
+fn local_time_str(tz_offset_min: i64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_secs = now.as_secs() as i64 + tz_offset_min * 60;
+    let ms = now.subsec_millis();
+    let days = total_secs.div_euclid(86400);
+    let sod = total_secs.rem_euclid(86400);
+    let (h, mi, sec) = (sod / 3600, (sod % 3600) / 60, sod % 60);
+    let (y, mo, d) = civil_from_days(days);
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}", y, mo, d, h, mi, sec, ms)
+}
+
+/// Howard Hinnant 的 civil_from_days：把「1970-01-01 起的天数」转成年月日
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 // ==========================================================================
@@ -316,7 +482,8 @@ fn open_serial(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> O
     };
 
     let stop = Arc::new(AtomicBool::new(false));
-    spawn_reader(app, stop.clone(), move |buf| {
+    let rec = state.recorder.clone();
+    spawn_reader(app, stop.clone(), rec, move |buf| {
         match reader.read(buf) {
             Ok(0) => Ok(0),
             Ok(n) => Ok(n),
@@ -369,7 +536,8 @@ fn open_tcp_client(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
     let label = addr.clone();
     let app2 = app.clone();
     let stop = Arc::new(AtomicBool::new(false));
-    spawn_reader(app.clone(), stop.clone(), move |buf| reader.read(buf));
+    let rec = state.recorder.clone();
+    spawn_reader(app.clone(), stop.clone(), rec, move |buf| reader.read(buf));
 
     // 连接断开时通知前端
     let stop2 = stop.clone();
@@ -410,6 +578,7 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
     let app2 = app.clone();
     let stop2 = stop.clone();
     let client2 = client.clone();
+    let rec2 = state.recorder.clone();
     let listener2 = match listener.try_clone() {
         Ok(l) => l,
         Err(e) => return OpenResult::err(e.to_string()),
@@ -439,6 +608,7 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
                     // 每个客户端一个读线程
                     let stop3 = stop2.clone();
                     let app3 = app2.clone();
+                    let rec3 = rec2.clone();
                     thread::spawn(move || {
                         let mut buf = [0u8; 8192];
                         loop {
@@ -448,6 +618,11 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
                             match rd.read(&mut buf) {
                                 Ok(0) => break,
                                 Ok(n) => {
+                                    if let Ok(mut g) = rec3.lock() {
+                                        if let Some(r) = g.as_mut() {
+                                            let _ = r.write(&buf[..n]);
+                                        }
+                                    }
                                     let _ = app3.emit("link:data", buf[..n].to_vec());
                                 }
                                 Err(ref e) if e.kind() == ErrorKind::TimedOut => continue,
@@ -517,15 +692,20 @@ fn open_udp(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> Open
     let label = format!("本机 {} → {}", local_shown, remote);
 
     let stop = Arc::new(AtomicBool::new(false));
-    spawn_reader(app, stop.clone(), move |buf| reader.recv(buf));
+    let rec = state.recorder.clone();
+    spawn_reader(app, stop.clone(), rec, move |buf| reader.recv(buf));
 
     *state.active.lock().unwrap() = Some(Active { link: Link::Udp { sock, remote }, stop });
     OpenResult::ok(label)
 }
 
 /// 起一个读线程，循环把数据 emit 给前端
-fn spawn_reader<F>(app: AppHandle, stop: Arc<AtomicBool>, mut read_fn: F)
-where
+fn spawn_reader<F>(
+    app: AppHandle,
+    stop: Arc<AtomicBool>,
+    rec: Arc<Mutex<Option<Recorder>>>,
+    mut read_fn: F,
+) where
     F: FnMut(&mut [u8]) -> std::io::Result<usize> + Send + 'static,
 {
     thread::spawn(move || {
@@ -537,6 +717,12 @@ where
             match read_fn(&mut buf) {
                 Ok(0) => thread::sleep(Duration::from_millis(5)),
                 Ok(n) => {
+                    // 先落盘（长时记录模式下这是主通道），再推给前端旁路显示
+                    if let Ok(mut g) = rec.lock() {
+                        if let Some(r) = g.as_mut() {
+                            let _ = r.write(&buf[..n]);
+                        }
+                    }
                     let _ = app.emit("link:data", buf[..n].to_vec());
                 }
                 Err(ref e) if e.kind() == ErrorKind::TimedOut || e.kind() == ErrorKind::WouldBlock => {
@@ -677,6 +863,78 @@ async fn save_file(app: AppHandle, payload: SavePayload) -> SaveResult {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordOptions {
+    /// 存到哪个目录
+    pub dir: String,
+    /// 文件名前缀，最终是 {base}_001.txt
+    pub base: String,
+    /// 单个文件上限（字节），0 表示用默认 8 MB
+    #[serde(default)]
+    pub max_bytes: u64,
+    /// 每行前面加本地时间戳
+    #[serde(default)]
+    pub add_ts: bool,
+    /// 本地时区相对 UTC 的分钟偏移（前端传，避免引时区库）
+    #[serde(default)]
+    pub tz_offset_min: i64,
+}
+
+#[tauri::command]
+fn record_start(state: State<'_, AppState>, opts: RecordOptions) -> Result<RecordStats, String> {
+    let mut g = state.recorder.lock().unwrap();
+    if let Some(mut old) = g.take() {
+        let _ = old.flush();
+    }
+    let rec = Recorder::new(
+        PathBuf::from(&opts.dir),
+        if opts.base.trim().is_empty() { "serial".into() } else { opts.base.trim().to_string() },
+        opts.max_bytes,
+        opts.add_ts,
+        opts.tz_offset_min,
+    )
+    .map_err(|e| format!("无法创建记录文件：{}", e))?;
+    let stats = rec.stats();
+    *g = Some(rec);
+    Ok(stats)
+}
+
+#[tauri::command]
+fn record_stop(state: State<'_, AppState>) -> Option<RecordStats> {
+    let mut g = state.recorder.lock().unwrap();
+    if let Some(mut r) = g.take() {
+        let _ = r.flush();
+        let mut st = r.stats();
+        st.active = false;
+        return Some(st);
+    }
+    None
+}
+
+#[tauri::command]
+fn record_status(state: State<'_, AppState>) -> Option<RecordStats> {
+    let g = state.recorder.lock().unwrap();
+    g.as_ref().map(|r| r.stats())
+}
+
+/// 让用户挑一个保存目录
+#[tauri::command]
+async fn pick_folder(app: AppHandle, default_dir: Option<String>) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut b = app.dialog().file().set_title("选择记录保存目录");
+    if let Some(d) = default_dir {
+        if !d.trim().is_empty() {
+            b = b.set_directory(PathBuf::from(d));
+        }
+    }
+    b.pick_folder(move |p| {
+        let _ = tx.send(p);
+    });
+    rx.recv().ok().flatten().map(|p| p.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -713,6 +971,10 @@ pub fn run() {
             set_signals,
             save_file,
             app_info,
+            record_start,
+            record_stop,
+            record_status,
+            pick_folder,
         ])
         .setup(|app| {
             // 把窗口图标也设上（跟 exe 资源图标保持一致）
@@ -870,5 +1132,59 @@ mod tests {
             assert!(!ip.starts_with("127."), "不应把回环地址列出来: {}", ip);
         }
         println!("本机 IPv4: {:?}", ips);
+    }
+    
+    /// 记录器：写盘 + 超上限自动开新文件
+    #[test]
+    fn recorder_writes_and_rotates() {
+        let dir = std::env::temp_dir().join("dfy_rec_test_a");
+        let _ = std::fs::remove_dir_all(&dir);
+        // 上限设小一点，方便触发翻页
+        let mut r = Recorder::new(dir.clone(), "t".into(), 100, false, 0).expect("创建记录器");
+        r.write(b"hello").unwrap();
+        r.flush().unwrap();
+        let f1 = dir.join("t_001.txt");
+        assert!(f1.exists(), "第一个文件应该已创建");
+        assert_eq!(std::fs::read_to_string(&f1).unwrap(), "hello");
+
+        // 连续写入超过 100 字节，应自动开第二个文件
+        for _ in 0..10 {
+            r.write(&[b'x'; 20]).unwrap();
+        }
+        r.flush().unwrap();
+        let f2 = dir.join("t_002.txt");
+        assert!(f2.exists(), "超过上限应自动开新文件，实际目录: {:?}", std::fs::read_dir(&dir).map(|it| it.filter_map(|e| e.ok()).map(|e| e.file_name()).collect::<Vec<_>>()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 记录器：加时间戳时每行一个，且跨写入块的行要拼回来
+    #[test]
+    fn recorder_timestamps_per_line() {
+        let dir = std::env::temp_dir().join("dfy_rec_test_b");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut r = Recorder::new(dir.clone(), "ts".into(), 0, true, 480).expect("创建记录器");
+        // 故意把一行拆成两次写，模拟串口分包
+        r.write(b"speed=198.").unwrap();
+        r.write(b"3\r\nspeed=200.1\r\n").unwrap();
+        r.flush().unwrap();
+        let txt = std::fs::read_to_string(dir.join("ts_001.txt")).unwrap();
+        println!("记录内容: {:?}", txt);
+        assert_eq!(txt.matches("speed=").count(), 2, "两行都应在");
+        assert_eq!(txt.matches('[').count(), 2, "每行应各有一个时间戳");
+        assert!(txt.contains("speed=198.3"), "跨块被拆的行应能拼回完整");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 记录器：不换行的尾巴也要落盘
+    #[test]
+    fn recorder_flushes_tail_without_newline() {
+        let dir = std::env::temp_dir().join("dfy_rec_test_c");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut r = Recorder::new(dir.clone(), "tail".into(), 0, true, 480).expect("创建记录器");
+        r.write(b"no-newline-here").unwrap();
+        r.flush().unwrap();
+        let txt = std::fs::read_to_string(dir.join("tail_001.txt")).unwrap();
+        assert!(txt.contains("no-newline-here"), "没有换行的尾段也不能丢");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

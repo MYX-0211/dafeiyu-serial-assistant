@@ -95,6 +95,14 @@ const S = {
   hexView: false, ts: false, packet: true, autoWrap: true, echo: false,
   pktGap: 20, bufLimit: 500000,
 
+  /* 接收区视图：text | chart */
+  rxView: 'text',
+  /* 长时记录 */
+  recording: false,
+  recDir: '',
+  recInfo: null,
+  recTimer: null,
+
   encoding: 'utf-8',
   sendHex: false, newline: true, nlMode: 'rn', checksum: 'none',
   keySend: false, enterSend: false,
@@ -194,6 +202,8 @@ function flushLog() {
   S.flushTimer = null;
   if (!S.buf.length) return;
   if (S.paused) { S.buf.length = 0; return; }
+  /* 曲线视图下不往 DOM 里堆文本，否则切回来会一次性塞入大量节点 */
+  if (S.rxView === 'chart') { S.buf.length = 0; return; }
   /* 智能跟随：滚动条本来就在底部才自动跟着走，用户往上翻看历史时不打断 */
   const atBottom = (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight) < 40;
   const frag = document.createDocumentFragment();
@@ -561,6 +571,18 @@ function setOpenBtnBusy(busy) {
   $('btnOpen').classList.toggle('busy', !!busy);
 }
 
+/* 文本 / 曲线视图切换：切到曲线时暂停 DOM 渲染，避免两边同时吃内存 */
+function applyRxView() {
+  const chart = S.rxView === 'chart';
+  const logEl2 = $('log');
+  logEl2.hidden = chart;
+  $('logEmpty').hidden = chart || logEl2.children.length > 0;
+  if (window.ChartView) {
+    ChartView.setActive(chart);
+    if (chart) setTimeout(function () { ChartView.resize(); }, 40);
+  }
+}
+
 function setConnectedUI(on) {
   $('sbPort').textContent = on ? (S.openLabel || t('sb.rx')) : t('sb.idle');
   $('btnOpenText').textContent = on ? modeWord().on : modeWord().off;
@@ -854,6 +876,102 @@ function runTool() {
 }
 
 /* ==========================================================================
+   11.5 长时记录
+   --------------------------------------------------------------------------
+   数据在 Rust 侧直接写盘，这里只负责开关和状态显示。
+   ========================================================================== */
+function fmtDur(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return (h ? h + ':' : '') + pad2(m) + ':' + pad2(s);
+}
+
+function recLoadOpts() {
+  S.recDir = LS.get('dfy.recDir', '');
+  $('recDir').value = S.recDir || '';
+  $('recBase').value = LS.get('dfy.recBase', 'serial');
+  $('recMaxMB').value = String(LS.get('dfy.recMaxMB', 8));
+  $('recAddTs').checked = LS.get('dfy.recAddTs', true);
+}
+
+function recSaveOpts() {
+  LS.set('dfy.recDir', S.recDir);
+  LS.set('dfy.recBase', $('recBase').value.trim() || 'serial');
+  LS.set('dfy.recMaxMB', Math.max(1, Number($('recMaxMB').value) || 8));
+  LS.set('dfy.recAddTs', $('recAddTs').checked);
+}
+
+function recRefreshUI(st) {
+  const on = !!(st && st.active);
+  S.recording = on;
+  S.recInfo = st || null;
+  $('recDot').hidden = !on;
+  $('btnRecord').classList.toggle('on', on);
+  $('btnRecToggle').textContent = on ? t('rec.stop') : t('rec.start');
+  if (on) {
+    $('recInfo').hidden = false;
+    $('recInfo').textContent = st.fileName + '  ' + fmtSize(st.bytes);
+  } else {
+    $('recInfo').hidden = true;
+  }
+  const stat = $('recStat');
+  if (on) {
+    stat.hidden = false;
+    stat.innerHTML = t('rec.statLine', {
+      files: '<b>' + st.files + '</b>',
+      size: '<b>' + fmtSize(st.bytes) + '</b>',
+      time: '<b>' + fmtDur(st.elapsedSecs) + '</b>'
+    }) + '<br>' + st.dir;
+  } else {
+    stat.hidden = true;
+  }
+}
+
+async function recStart() {
+  if (!NATIVE || !NATIVE.recordStart) { toast(t('toast.recFailed') + 'unsupported', 'err'); return; }
+  if (!S.recDir) { toast(t('rec.needDir'), 'warn'); return; }
+  recSaveOpts();
+  try {
+    const st = await NATIVE.recordStart({
+      dir: S.recDir,
+      base: $('recBase').value.trim() || 'serial',
+      maxBytes: Math.max(1, Number($('recMaxMB').value) || 8) * 1024 * 1024,
+      addTs: $('recAddTs').checked,
+      tzOffsetMin: -new Date().getTimezoneOffset()
+    });
+    recRefreshUI(st);
+    toast(t('rec.started') + st.fileName, 'ok');
+    if (!S.recTimer) S.recTimer = setInterval(recPoll, 2000);
+  } catch (e) {
+    toast(t('toast.recFailed') + ((e && e.message) || e), 'err');
+  }
+}
+
+async function recStop() {
+  if (!NATIVE || !NATIVE.recordStop) return;
+  try {
+    const st = await NATIVE.recordStop();
+    recRefreshUI(null);
+    if (S.recTimer) { clearInterval(S.recTimer); S.recTimer = null; }
+    if (st) toast(t('rec.stopped') + st.files + t('rec.files') + ' · ' + fmtSize(st.bytes), 'ok');
+  } catch (e) {
+    toast(t('toast.recFailed') + ((e && e.message) || e), 'err');
+  }
+}
+
+async function recPoll() {
+  if (!NATIVE || !NATIVE.recordStatus) return;
+  try {
+    const st = await NATIVE.recordStatus();
+    if (!st) {
+      if (S.recTimer) { clearInterval(S.recTimer); S.recTimer = null; }
+      recRefreshUI(null);
+      return;
+    }
+    recRefreshUI(st);
+  } catch (_) { }
+}
+
+/* ==========================================================================
    12. 主题
    ========================================================================== */
 
@@ -873,6 +991,7 @@ function openTool() {
 /* 切换语言后：静态文案由 applyLang 处理，动态生成的部件要重建一遍 */
 function refreshAfterLangChange() {
   $('langLabel').textContent = (getLang() === 'zh') ? 'EN' : '中';
+  recRefreshUI(S.recInfo);
   renderModeOptions();
   renderCmds();
   setConnectedUI(S.isOpen);
@@ -1097,6 +1216,35 @@ function bindAll() {
     });
   });
 
+  /* ---------- 接收区视图切换（文本 / 曲线） ---------- */
+  $('rxView').addEventListener('click', function (e) {
+    const b = e.target.closest ? e.target.closest('button[data-view]') : null;
+    if (!b) return;
+    const v = b.dataset.view;
+    if (v === S.rxView) return;
+    S.rxView = v;
+    Array.prototype.forEach.call(this.children, function (x) {
+      x.classList.toggle('on', x.dataset.view === v);
+    });
+    applyRxView();
+    LS.set('dfy.rxView', v);
+  });
+
+  /* ---------- 长时记录 ---------- */
+  $('btnRecord').addEventListener('click', function () { openModal($('recModal')); recRefreshUI(S.recInfo); });
+  $('btnRecClose').addEventListener('click', function () { closeModal($('recModal')); });
+  $('recModal').addEventListener('click', function (e) { if (e.target === this) closeModal(this); });
+  $('btnRecPick').addEventListener('click', async function () {
+    if (!NATIVE || !NATIVE.pickFolder) return;
+    try {
+      const d = await NATIVE.pickFolder(S.recDir);
+      if (d) { S.recDir = d; $('recDir').value = d; recSaveOpts(); }
+    } catch (_) { }
+  });
+  $('btnRecToggle').addEventListener('click', function () {
+    if (S.recording) recStop(); else recStart();
+  });
+
   /* ---------- 语言切换 ---------- */
   $('btnLang').addEventListener('click', function () {
     setLang(getLang() === 'zh' ? 'en' : 'zh');
@@ -1252,6 +1400,14 @@ async function init() {
   $('selEncoding').value = S.encoding;
 
   $('brand').textContent = t('app.name') + ' · MYX';
+
+  if (window.ChartView) ChartView.init();
+  recLoadOpts();
+  S.rxView = LS.get('dfy.rxView', 'text');
+  Array.prototype.forEach.call($('rxView').children, function (x) {
+    x.classList.toggle('on', x.dataset.view === S.rxView);
+  });
+  applyRxView();
 
   loadCmds();
   renderCmds();

@@ -52,6 +52,13 @@ exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 
 
 **接收**：HEX / 时间戳 / 显示发送 / 自动换行 / 分包显示 + 超时 / **UTF-8·GBK 编码切换** / 暂停 / 清空 / 保存
 
+**长时记录**（v2.1 新增）：数据在 Rust 侧**直接写盘、不经过界面** —— 跑一整天内存也不涨。
+可设保存目录、文件名前缀、**分文件大小**（写满自动开下一个）、**每行前加本地时间戳**。
+状态栏会实时显示当前文件名和已写字节。
+
+**曲线**（v2.1 新增）：接收区可切「文本 / 曲线」视图，自动从每行提取  画曲线（最多 6 条）。
+切到曲线视图时文本不再堆 DOM，两边不会同时吃内存。
+
 **发送**：HEX·ASCII / 新行 CRLF·LF·CR / 定时发送 / 追加校验（CRC16·CCITT·ADD8·XOR8）/
 **按键即发** / **回车发送** / 发送文件（256 字节分包）/ 拖文件到窗口
 
@@ -184,6 +191,14 @@ The "Local" field is a dropdown of every IPv4 on the machine, defaulting to **Al
 
 **Receive** — HEX, timestamp, echo, auto-wrap, packet splitting with gap timeout,
 **UTF-8 / GBK switch**, pause, clear, save.
+
+**Long-run recording** (new in v2.1): data is written **straight to disk in the Rust backend**,
+bypassing the UI — memory stays flat all day. Configurable folder, file prefix,
+**split size** (a new file starts automatically when one fills up) and **per-line local timestamps**.
+
+**Chart view** (new in v2.1): the receive pane toggles between **Text / Chart** and auto-plots
+ pairs (up to 6 series). While in chart view the text stops accumulating DOM nodes,
+so the two never fight over memory.
 
 **Send** — HEX/ASCII, newline (CRLF/LF/CR), timed send, appended checksum
 (CRC16 / CCITT / ADD8 / XOR8), **send on keypress**, **send on Enter**, file sending in

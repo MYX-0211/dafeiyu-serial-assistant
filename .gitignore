@@ -1,22 +1,28 @@
-# 依赖与构建产物
-node_modules/
+# ---------- Tauri / Rust ----------
+src-tauri/target/
+src-tauri/gen/
+target/
 dist/
-out/
 
-# 打包中间文件
+# ---------- Node（legacy Electron 版）----------
+node_modules/
+legacy-electron/node_modules/
+legacy-electron/dist/
+
+# ---------- 打包中间产物 ----------
 *.nsis.7z
 builder-debug.yml
 win-unpacked/
-
-# 开发用
 *.log
+
+# ---------- 开发用 ----------
 *.bak
 *-legacy/
 _legacy-v1/
 .DS_Store
 Thumbs.db
 
-# 编辑器
+# ---------- 编辑器 ----------
 .vscode/
 .idea/
 *.swp

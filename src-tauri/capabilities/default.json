@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "大肥鱼串口助手所需的权限：文件保存对话框、打开外部链接",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-save",
+    "opener:allow-open-url"
+  ]
+}

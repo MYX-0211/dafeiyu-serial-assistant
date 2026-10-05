@@ -1,0 +1,30 @@
+[package]
+name = "dafeiyu-serial-assistant"
+version = "1.0.0"
+description = "大肥鱼串口助手 — 串口 / TCP / UDP 调试工具"
+authors = ["MYX"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "dafeiyu_serial_assistant_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serialport = "4.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+local-ip-address = "0.6"
+
+[profile.release]
+opt-level = "s"      # 优先体积（Tauri 的一大卖点就是小）
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -249,6 +249,23 @@ app.whenReady().then(function () {
       } catch (e) { log('异常恢复测试失败 ' + e.message); }
     }
 
+    /* 关于窗口实测 */
+    if (VIEW === 'about') {
+      try {
+        await JS("document.getElementById('btnHelp').click(); true");
+        await new Promise(function (r) { setTimeout(r, 250); });
+        await JS("document.getElementById('btnAbout').click(); true");
+        await new Promise(function (r) { setTimeout(r, 600); });
+        const info = await JS("(function(){var m=document.querySelector('#aboutModal .modal');" +
+          "var r=m.getBoundingClientRect();" +
+          "return JSON.stringify({w:Math.round(r.width),h:Math.round(r.height)," +
+          "name:document.querySelector('.about-name').textContent," +
+          "icon:document.querySelector('.about-icon').naturalWidth+" +
+          "' '+document.querySelector('.about-icon').offsetWidth});})()");
+        log('关于窗口: ' + info);
+      } catch (e) { log('关于窗口测试失败 ' + e.message); }
+    }
+
     /* 语言切换实测 */
     if (VIEW === 'lang' || VIEW === 'en') {
       try {

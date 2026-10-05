@@ -38,6 +38,18 @@ let closing = false;      // 主动关闭中：屏蔽自己触发的 close 事�
 const isDev = !app.isPackaged;
 
 /* ==========================================================================
+   启动 / 内存优化
+   --------------------------------------------------------------------------
+   · 限制 V8 堆：串口长时间高速接收时，日志缓冲在 500 KB 就会滚动清理，
+     给 256 MB 足够用，同时避免异常情况下的内存失控
+   · 关掉用不到的 Chromium 特性，减少常驻内存与启动开销
+   · 注意：不能禁用 GPU —— 界面的毛玻璃（backdrop-filter）依赖 GPU 合成
+   ========================================================================== */
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+app.commandLine.appendSwitch('disable-features', 'MediaRouter,CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('renderer-process-limit', '1');   // 只开一个渲染进程，省内存
+
+/* ==========================================================================
    窗口状态记忆
    ========================================================================== */
 function stateFile() {
@@ -83,7 +95,7 @@ function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#F2F2F7',
     title: '大肥鱼串口助手',
-    icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+    icon: path.join(__dirname, 'renderer', 'assets', 'app.ico'),   // 放在打包范围内，否则会回退成默认图标
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -542,17 +554,10 @@ function registerIpc() {
 /* ==========================================================================
    生命周期
    ========================================================================== */
-const gotLock = app.requestSingleInstanceLock();
-if (!gotLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
-  });
+/* 允许多开：一个实例连 COM3、另一个连 COM5 是常见用法，
+   所以这里不再用 requestSingleInstanceLock 限制单实例。 */
 
+if (true) {
   app.whenReady().then(() => {
     /* 整体是白色毛玻璃风格：让系统标题栏 / 菜单 / 弹窗也用浅色 */
     try { nativeTheme.themeSource = 'light'; } catch (_) { }

@@ -31,6 +31,11 @@
       "src/**/*",
       "package.json",
       "!**/*.map",
+      "!**/node_modules/@serialport/bindings-cpp/prebuilds/android-*/**",
+      "!**/node_modules/@serialport/bindings-cpp/prebuilds/darwin-*/**",
+      "!**/node_modules/@serialport/bindings-cpp/prebuilds/linux-*/**",
+      "!**/node_modules/@serialport/bindings-cpp/prebuilds/win32-arm64/**",
+      "!**/node_modules/@serialport/bindings-cpp/prebuilds/win32-ia32/**",
       "!**/{.git,.github,test,tests,doc,docs,example,examples}/**"
     ],
     "asar": true,

@@ -58,6 +58,11 @@
 }
 
 /* -------------------------------------------------------------------------- */
+/* hidden 属性的兜底：CSS 里的 display 会覆盖 hidden 自带的 display:none，
+   元素一旦设了 display:flex/grid，hidden 就失效。这里统一兜底，
+   以后新增元素不用再逐个补 [hidden] 规则。 */
+[hidden] { display: none !important; }
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {

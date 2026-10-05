@@ -255,6 +255,8 @@ function clearLog() {
   logEl.innerHTML = '';
   S.buf.length = 0;
   S.logBytes = 0; S.lineEnded = false;
+  /* 曲线数据一并清掉，否则点了「清空」曲线还留着旧波形，会误导 */
+  if (window.ChartView) ChartView.clear();
   $('rxBadge').textContent = t('rx.lines', { n: 0 });
   toggleEmpty();
 }

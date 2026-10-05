@@ -1,0 +1,477 @@
+/* ==========================================================================
+   大肥鱼串口助手 · 多语言
+   --------------------------------------------------------------------------
+   · 页面里的静态文案用 data-i18n / data-i18n-title / data-i18n-ph
+     （placeholder）标记，applyLang() 负责整体替换
+   · 代码里动态拼的文案统一走 t('key')
+   · 默认中文，选择记在 localStorage
+   ========================================================================== */
+'use strict';
+
+const I18N = {
+  /* ---------------------------------------------------------------- 中文 */
+  zh: {
+    'app.name': '大肥鱼串口助手',
+    'app.tagline': '串口 / TCP / UDP 调试工具',
+
+    /* 顶栏 */
+    'mode.serial': '串口',
+    'mode.network': '网络',
+    'mode.scanning': '扫描中…',
+    'mode.noPort': '（未检测到串口设备）',
+    'tip.mode': '选择串口，或切换到 TCP / UDP 网络模式',
+    'tip.refresh': '刷新串口列表',
+    'tip.baud': '波特率',
+    'tip.dataBits': '数据位',
+    'tip.stopBits': '停止位',
+    'tip.parity': '校验位',
+    'tip.flow': '流控',
+    'tip.remoteHost': '对端 IP / 主机名',
+    'tip.remotePort': '对端端口',
+    'tip.localAddr': '本机用来绑定的网卡地址；选「全部网卡」最省事',
+    'tip.localPort': '本地监听 / 绑定端口',
+    'tip.lang': '切换语言 / Switch language',
+    'tip.tools': '校验计算器（Modbus CRC16 / CRC16-CCITT / ADD8 / XOR8）',
+    'tip.help': '使用说明',
+
+    'db.8': '8 位', 'db.7': '7 位', 'db.6': '6 位', 'db.5': '5 位',
+    'sb.1': '1 位', 'sb.1.5': '1.5 位', 'sb.2': '2 位',
+    'parity.none': '无校验', 'parity.even': '偶校验', 'parity.odd': '奇校验',
+    'flow.none': '无流控', 'flow.rtscts': 'RTS/CTS', 'flow.xonxoff': 'XON/XOFF',
+    'net.remote': '远程', 'net.local': '本地', 'net.allIf': '全部网卡',
+
+    /* 按钮（按模式区分） */
+    'btn.open': '打开',
+    'btn.close': '关闭',
+    'btn.connect': '连接',
+    'btn.disconnect': '断开',
+    'btn.listen': '侦听',
+    'btn.opening': '打开中…',
+    'btn.connecting': '连接中…',
+    'btn.listening': '侦听中…',
+
+    /* 接收区 */
+    'pane.rx': '接收区',
+    'rx.lines': '{n} 行',
+    'rx.empty': '选好模式后点「打开」，数据会显示在这里',
+    'rx.hex': 'HEX',
+    'rx.timestamp': '时间戳',
+    'rx.echo': '显示发送',
+    'rx.wrap': '自动换行',
+    'rx.packet': '分包显示',
+    'rx.gap': '超时',
+    'rx.encoding': '编码',
+    'rx.encodingTip': '接收文字的编码方式：单片机 Keil 工程的中文一般是 GBK，Linux / RTOS 日志一般是 UTF-8',
+    'rx.gapTip': '分包超时：超过该时间没有新数据就认为一包结束',
+    'rx.pause': '暂停',
+    'rx.resume': '继续',
+    'rx.clear': '清空',
+    'rx.save': '保存',
+    'tip.bottom': '滚动到最底部',
+    'tip.save': '保存接收数据',
+    'tip.clearRx': '清空接收区',
+
+    /* 多条字符串 */
+    'pane.cmds': '多条字符串发送',
+    'tip.addCmd': '新增一条',
+    'cmd.empty': '还没有指令，点右上角「+ 新增」添加一条',
+    'cmd.interval': '间隔',
+    'cmd.loop': '循环',
+    'cmd.sendAll': '全部发送',
+    'cmd.send': '发送',
+    'cmd.del': '删除这一条',
+    'cmd.typeTip': '点击切换这一条按 ASCII 还是 HEX 发送',
+    'cmd.phHex': 'HEX：01 03 00 00 00 02',
+    'cmd.phAsc': 'ASCII 文本',
+
+    /* 发送区 */
+    'pane.tx': '发送区',
+    'tx.bytes': '{n} 字节',
+    'tx.bytesCk': '{n} 字节（含校验）',
+    'tx.hexBad': 'HEX 格式有误',
+    'btn.send': '发送',
+    'btn.sendFile': '发送文件',
+    'tx.sendHex': 'HEX 发送',
+    'tx.newline': '发送新行',
+    'tx.checksum': '不追加校验',
+    'tx.keySend': '按键即发',
+    'tx.enterSend': '回车发送',
+    'tx.timer': '定时发送',
+    'tx.hint': 'Ctrl+Enter 发送',
+    'tx.phHex': '按十六进制输入，例如：01 03 00 00 00 02\n支持空格 / 逗号分隔，也支持 0x 前缀',
+    'tx.phAsc': '在此输入要发送的内容…（HEX 模式示例：01 03 00 00 00 02，支持空格 / 逗号 / 0x 前缀）',
+    'tip.keySend': '在输入框里每敲一个字符就立刻发出（和设备做终端交互时用）',
+    'tip.enterSend': '在输入框里按 Enter 直接发送当前内容（Shift + Enter 用于换行）',
+    'ck.none': '不追加校验',
+    'ck.crc16modbus': 'Modbus CRC16',
+    'ck.crc16ccitt': 'CRC16-CCITT',
+    'ck.add8': '累加和 ADD8',
+    'ck.xor8': '异或 XOR8',
+    'ck.all': '全部',
+
+    /* 状态栏 */
+    'sb.rx': '接收',
+    'sb.tx': '发送',
+    'sb.pkt': '包',
+    'sb.idle': '未连接',
+    'sb.reset': '清空计数',
+    'sb.bytes': '字节',
+
+    /* 校验计算器 */
+    'tool.title': '校验计算器',
+    'tool.close': '关闭',
+    'tool.ph': '输入十六进制字节，例如 01 03 00 00 00 02（支持空格 / 逗号 / 0x 前缀）',
+    'tool.waiting': '等待输入…',
+    'tool.badInput': '解析失败：',
+    'tool.inputIs': '输入 {n} 字节：',
+
+    /* 帮助 */
+    'help.title': '使用说明',
+    'help.ok': '知道了',
+    'help.about': '软件信息',
+    'help.modes': '三种连接模式',
+    'help.serial': '串口',
+    'help.serialDesc': '—— 下拉列表里直接选 COM 口，插拔设备会自动刷新。',
+    'help.tcpClient': 'TCP Client',
+    'help.tcpClientDesc': '—— 作为客户端连接「远程 IP + 端口」。',
+    'help.tcpServer': 'TCP Server',
+    'help.tcpServerDesc': '—— 用「本地」地址 + 端口在本机监听。',
+    'help.localHint': '本地地址建议选「全部网卡」',
+    'help.localHint2': '，这样所有网卡都能连进来；若指定具体某张网卡，只有该网段能连。',
+    'help.udp': 'UDP',
+    'help.udpDesc': '—— 用「本地」地址 + 端口绑定收包，往「远程 IP + 端口」发包（本地端口填 0 表示自动分配）。',
+    'help.rxTitle': '接收区',
+    'help.rx1': '「分包显示」默认开启：超过设定超时（默认 20 ms）没有新数据就换行，便于分辨一帧一帧的数据。',
+    'help.rx2': '滚动条在底部时会自动跟随新数据；往上翻看历史时不会被打断，点右下角箭头可回到底部。',
+    'help.rx3': 'HEX 输入允许空格、逗号、0x 前缀，大小写不限。',
+    'help.gbk': '中文乱码',
+    'help.gbk2': '？把接收区的「编码」从 UTF-8 切到 GBK —— Keil 工程里的中文字符串默认就是 GBK 编码。',
+    'help.cmdTitle': '多条字符串发送',
+    'help.cmd1': '直接在右侧输入框里改内容，改完自动保存；输入框里按 Enter 直接发送。',
+    'help.cmd2': '点每条后面的 ASC / HEX 标签，切换这一条按文本还是十六进制发送。',
+    'help.cmd3': '「全部发送」按顺序发一遍；勾上「循环」按设定间隔轮流发送。',
+    'help.keyTitle': '按键即发 / 回车发送',
+    'help.key1': '按键即发：勾上后，在发送框里每敲一个字符就立刻发出去，输入框同时保留内容方便你看。和设备做终端式交互（比如敲 Shell 命令）时很顺手；退格键会发送 0x08。',
+    'help.key2': '回车发送：勾上后，在发送框里按 Enter 直接发出当前内容并清空输入框；想换行用 Shift + Enter。',
+    'help.key3': '两者可以同时开：边敲边发，回车补一个换行结束这一行。',
+    'help.key4': '没勾选时，Enter 就是普通换行，用 Ctrl + Enter 发送。',
+    'help.shortcut': '快捷键',
+    'help.sc1': 'Ctrl + Enter 发送　Ctrl + K 清空接收区　Ctrl + Shift + L 清空发送框',
+    'help.sc2': 'Ctrl + 鼠标滚轮 调整接收区字号　Esc 关闭弹窗并停止定时 / 循环发送',
+    'help.sc3': '把文件拖到窗口上 = 按 256 字节分包发送该文件',
+    'help.aboutTitle': '关于',
+    'help.author': '作者',
+    'help.source': '开源地址',
+    'help.version': '版本',
+
+    /* 提示语 */
+    'toast.scanned': '已扫描到 {n} 个串口设备',
+    'toast.scanFail': '扫描串口失败：',
+    'toast.needPort': '请先选择一个串口设备',
+    'toast.needRemoteHost': '请填写远程 IP / 主机名',
+    'toast.needRemotePort': '请填写有效的远程端口',
+    'toast.needLocalPort': '请填写本地监听端口',
+    'toast.newPort': '检测到新串口设备',
+    'toast.cancelled': '已取消',
+    'toast.cleared': '接收区已清空',
+    'toast.statReset': '统计已清零',
+    'toast.paused': '已暂停显示（仍在后台接收）',
+    'toast.resumed': '已恢复显示',
+    'toast.noDesktop': '未检测到桌面运行环境',
+    'toast.noContent': '没有可发送的内容',
+    'toast.badContent': '内容格式错误：',
+    'toast.notOpen': '还没打开连接',
+    'toast.emptyCmd': '指令内容为空',
+    'toast.noCmd': '没有可发送的指令',
+    'toast.noLoopCmd': '没有可循环发送的指令',
+    'toast.sendInterrupted': '发送中断，已发出 {a} / {b} 条',
+    'toast.sentAll': '已按顺序发送 {n} 条指令',
+    'toast.timerOn': '开始定时发送，间隔 {ms} ms',
+    'toast.timerOff': '定时发送已停止：',
+    'toast.fileEmpty': '文件为空',
+    'toast.fileStart': '开始发送 {name}（{size}）',
+    'toast.fileDone': '文件发送完成：{name}（{size}）',
+    'toast.fileAbort': '文件发送中断，已发送 {sent} / {total}',
+    'toast.saved': '已保存到 ',
+    'toast.saveFail': '保存失败：',
+    'toast.nothingToSave': '接收区没有内容',
+    'toast.encGbk': '接收编码已切换为 GBK（Keil 工程的中文就选这个）',
+    'toast.encUtf8': '接收编码已切换为 UTF-8',
+    'toast.langSwitched': 'Language switched to English',
+    'toast.opened': '已{word} {label}',
+    'toast.openFail': '{word}失败：',
+    'toast.peerIn': '客户端已接入 ',
+    'toast.clientIn': '客户端已接入：',
+    'toast.clientOut': '客户端已断开',
+    'toast.closed': '已断开',
+    'toast.closeErr': '关闭时出错：',
+
+    'hint.opened': '已{word} {label}，断开后可切换模式或改参数。',
+    'hint.portInfo': '共 {n} 个串口',
+    'hint.noPort': '未检测到串口设备 —— 插上 USB 转串口模块后会自动刷新。',
+    'hint.tcpClient': '作为客户端连接远程 IP / 端口。',
+    'hint.tcpServerAll': '在本机所有网卡上监听，等设备连进来。本机地址：',
+    'hint.tcpServerOne': '只在这张网卡（{addr}）上监听，只有同网段的设备能连进来。',
+    'hint.udp': '往远程 IP / 端口发包，用本地地址 / 端口收包（本地端口填 0 表示自动分配）。',
+
+    'log.openFail': '失败：',
+    'log.opened': '已{word}  ',
+    'log.closed': '已断开',
+    'log.pausedDrop': '（暂停期间丢弃 {size}）',
+    'log.noDesktop': '当前不是在桌面应用中运行 —— 功能不可用。请通过 exe 启动。',
+
+    /* 波形/其它已移除功能占位 */
+    'misc.yes': '是',
+    'misc.no': '否'
+  },
+
+  /* ---------------------------------------------------------------- English */
+  en: {
+    'app.name': 'Big Fat Fish Serial Assistant',
+    'app.tagline': 'Serial / TCP / UDP debugging tool',
+
+    'mode.serial': 'Serial',
+    'mode.network': 'Network',
+    'mode.scanning': 'Scanning…',
+    'mode.noPort': '(no serial device found)',
+    'tip.mode': 'Pick a serial port, or switch to TCP / UDP',
+    'tip.refresh': 'Rescan serial ports',
+    'tip.baud': 'Baud rate',
+    'tip.dataBits': 'Data bits',
+    'tip.stopBits': 'Stop bits',
+    'tip.parity': 'Parity',
+    'tip.flow': 'Flow control',
+    'tip.remoteHost': 'Remote IP / hostname',
+    'tip.remotePort': 'Remote port',
+    'tip.localAddr': 'Local NIC address to bind; “All interfaces” is the easiest choice',
+    'tip.localPort': 'Local listen / bind port',
+    'tip.lang': '切换语言 / Switch language',
+    'tip.tools': 'Checksum calculator (Modbus CRC16 / CRC16-CCITT / ADD8 / XOR8)',
+    'tip.help': 'Help',
+
+    'db.8': '8 bit', 'db.7': '7 bit', 'db.6': '6 bit', 'db.5': '5 bit',
+    'sb.1': '1 bit', 'sb.1.5': '1.5 bit', 'sb.2': '2 bit',
+    'parity.none': 'None', 'parity.even': 'Even', 'parity.odd': 'Odd',
+    'flow.none': 'None', 'flow.rtscts': 'RTS/CTS', 'flow.xonxoff': 'XON/XOFF',
+    'net.remote': 'Remote', 'net.local': 'Local', 'net.allIf': 'All interfaces',
+
+    'btn.open': 'Open',
+    'btn.close': 'Close',
+    'btn.connect': 'Connect',
+    'btn.disconnect': 'Disconnect',
+    'btn.listen': 'Listen',
+    'btn.opening': 'Opening…',
+    'btn.connecting': 'Connecting…',
+    'btn.listening': 'Listening…',
+
+    'pane.rx': 'Receive',
+    'rx.lines': '{n} lines',
+    'rx.empty': 'Pick a mode and hit Open — data will show up here',
+    'rx.hex': 'HEX',
+    'rx.timestamp': 'Timestamp',
+    'rx.echo': 'Show TX',
+    'rx.wrap': 'Wrap',
+    'rx.packet': 'Split packets',
+    'rx.gap': 'Gap',
+    'rx.encoding': 'Encoding',
+    'rx.encodingTip': 'How received bytes are decoded: Keil projects usually emit GBK, Linux/RTOS logs are UTF-8',
+    'rx.gapTip': 'Packet gap: if no new data arrives within this time, treat it as one packet',
+    'rx.pause': 'Pause',
+    'rx.resume': 'Resume',
+    'rx.clear': 'Clear',
+    'rx.save': 'Save',
+    'tip.bottom': 'Scroll to bottom',
+    'tip.save': 'Save received data',
+    'tip.clearRx': 'Clear receive area',
+
+    'pane.cmds': 'Quick send list',
+    'tip.addCmd': 'Add an entry',
+    'cmd.empty': 'No entry yet — click “+” at the top right to add one',
+    'cmd.interval': 'Interval',
+    'cmd.loop': 'Loop',
+    'cmd.sendAll': 'Send all',
+    'cmd.send': 'Send',
+    'cmd.del': 'Delete this entry',
+    'cmd.typeTip': 'Click to toggle ASCII / HEX for this entry',
+    'cmd.phHex': 'HEX: 01 03 00 00 00 02',
+    'cmd.phAsc': 'ASCII text',
+
+    'pane.tx': 'Send',
+    'tx.bytes': '{n} bytes',
+    'tx.bytesCk': '{n} bytes (incl. checksum)',
+    'tx.hexBad': 'Invalid HEX',
+    'btn.send': 'Send',
+    'btn.sendFile': 'Send file',
+    'tx.sendHex': 'HEX send',
+    'tx.newline': 'Append newline',
+    'tx.checksum': 'No checksum',
+    'tx.keySend': 'Send on keypress',
+    'tx.enterSend': 'Send on Enter',
+    'tx.timer': 'Timed send',
+    'tx.hint': 'Ctrl+Enter to send',
+    'tx.phHex': 'Enter hex bytes, e.g. 01 03 00 00 00 02\nSpaces / commas / 0x prefix all accepted',
+    'tx.phAsc': 'Type what to send… (hex example: 01 03 00 00 00 02)',
+    'tip.keySend': 'Send each character as soon as you type it (handy for terminal-style interaction)',
+    'tip.enterSend': 'Press Enter in the box to send the whole line (Shift + Enter inserts a newline)',
+    'ck.none': 'No checksum',
+    'ck.crc16modbus': 'Modbus CRC16',
+    'ck.crc16ccitt': 'CRC16-CCITT',
+    'ck.add8': 'Checksum ADD8',
+    'ck.xor8': 'XOR8',
+    'ck.all': 'All',
+
+    'sb.rx': 'RX',
+    'sb.tx': 'TX',
+    'sb.pkt': 'Packets',
+    'sb.idle': 'Not connected',
+    'sb.reset': 'Reset counters',
+    'sb.bytes': 'bytes',
+
+    'tool.title': 'Checksum calculator',
+    'tool.close': 'Close',
+    'tool.ph': 'Enter hex bytes, e.g. 01 03 00 00 00 02 (spaces / commas / 0x prefix accepted)',
+    'tool.waiting': 'Waiting for input…',
+    'tool.badInput': 'Parse failed: ',
+    'tool.inputIs': '{n} bytes in: ',
+
+    'help.title': 'Help',
+    'help.ok': 'Got it',
+    'help.about': 'About',
+    'help.modes': 'Connection modes',
+    'help.serial': 'Serial',
+    'help.serialDesc': '— pick a COM port from the list; the list auto-refreshes on plug/unplug.',
+    'help.tcpClient': 'TCP Client',
+    'help.tcpClientDesc': '— connect out to the remote IP + port.',
+    'help.tcpServer': 'TCP Server',
+    'help.tcpServerDesc': '— listen on the local address + port.',
+    'help.localHint': 'Prefer “All interfaces” for the local address',
+    'help.localHint2': ' so every NIC can accept connections; picking one NIC limits it to that subnet.',
+    'help.udp': 'UDP',
+    'help.udpDesc': '— bind the local address + port to receive, send to the remote IP + port (local port 0 = auto).',
+    'help.rxTitle': 'Receive area',
+    'help.rx1': '“Split packets” is on by default: a new line starts after the gap timeout (20 ms) with no new data.',
+    'help.rx2': 'Auto-scrolls when the scrollbar is at the bottom; scrolling up to read history is not interrupted.',
+    'help.rx3': 'HEX input accepts spaces, commas and 0x prefixes, case-insensitive.',
+    'help.gbk': 'Mojibake?',
+    'help.gbk2': ' Switch Encoding from UTF-8 to GBK — Keil projects emit GBK by default.',
+    'help.cmdTitle': 'Quick send list',
+    'help.cmd1': 'Edit entries in place — changes save automatically; press Enter in a box to send it.',
+    'help.cmd2': 'Click the ASC / HEX tag on each row to change how that entry is sent.',
+    'help.cmd3': '“Send all” sends every entry in order; tick “Loop” to cycle them on an interval.',
+    'help.keyTitle': 'Send on keypress / Enter',
+    'help.key1': 'Send on keypress: each typed character is sent immediately while staying visible in the box. Great for terminal-style interaction; Backspace sends 0x08.',
+    'help.key2': 'Send on Enter: pressing Enter sends the whole line and clears the box; Shift + Enter inserts a newline.',
+    'help.key3': 'Both can be enabled together: type away, then Enter to finish the line.',
+    'help.key4': 'With both off, Enter inserts a newline and Ctrl + Enter sends.',
+    'help.shortcut': 'Shortcuts',
+    'help.sc1': 'Ctrl + Enter send　Ctrl + K clear receive　Ctrl + Shift + L clear send box',
+    'help.sc2': 'Ctrl + wheel adjust font size　Esc close dialog & stop timed / loop sending',
+    'help.sc3': 'Drop a file onto the window to send it in 256-byte chunks',
+    'help.aboutTitle': 'About',
+    'help.author': 'Author',
+    'help.source': 'Source',
+    'help.version': 'Version',
+
+    'toast.scanned': 'Found {n} serial port(s)',
+    'toast.scanFail': 'Failed to scan ports: ',
+    'toast.needPort': 'Please pick a serial port first',
+    'toast.needRemoteHost': 'Please fill in the remote IP / hostname',
+    'toast.needRemotePort': 'Please fill in a valid remote port',
+    'toast.needLocalPort': 'Please fill in the local listen port',
+    'toast.newPort': 'New serial device detected',
+    'toast.cancelled': 'Cancelled',
+    'toast.cleared': 'Receive area cleared',
+    'toast.statReset': 'Counters reset',
+    'toast.paused': 'Display paused (still receiving in background)',
+    'toast.resumed': 'Display resumed',
+    'toast.noDesktop': 'Desktop runtime not detected',
+    'toast.noContent': 'Nothing to send',
+    'toast.badContent': 'Invalid content: ',
+    'toast.notOpen': 'Connection is not open yet',
+    'toast.emptyCmd': 'Entry is empty',
+    'toast.noCmd': 'No entry to send',
+    'toast.noLoopCmd': 'No entry to loop',
+    'toast.sendInterrupted': 'Interrupted, sent {a} / {b}',
+    'toast.sentAll': 'Sent {n} entries in order',
+    'toast.timerOn': 'Timed send started, every {ms} ms',
+    'toast.timerOff': 'Timed send stopped: ',
+    'toast.fileEmpty': 'File is empty',
+    'toast.fileStart': 'Sending {name} ({size})',
+    'toast.fileDone': 'Sent {name} ({size})',
+    'toast.fileAbort': 'Send aborted, {sent} / {total} sent',
+    'toast.saved': 'Saved to ',
+    'toast.saveFail': 'Save failed: ',
+    'toast.nothingToSave': 'Nothing to save',
+    'toast.encGbk': 'Encoding switched to GBK',
+    'toast.encUtf8': 'Encoding switched to UTF-8',
+    'toast.langSwitched': '已切换为中文',
+    'toast.opened': '{word}: {label}',
+    'toast.openFail': '{word} failed: ',
+    'toast.peerIn': 'Client connected ',
+    'toast.clientIn': 'Client connected: ',
+    'toast.clientOut': 'Client disconnected',
+    'toast.closed': 'Disconnected',
+    'toast.closeErr': 'Error while closing: ',
+
+    'hint.opened': '{word}: {label} — disconnect to change mode or parameters.',
+    'hint.portInfo': '{n} port(s) total',
+    'hint.noPort': 'No serial device found — plug in a USB-UART adapter and it will refresh automatically.',
+    'hint.tcpClient': 'Connect out to the remote IP / port.',
+    'hint.tcpServerAll': 'Listening on all interfaces, waiting for a client. Local: ',
+    'hint.tcpServerOne': 'Listening only on {addr} — reachable from that subnet only.',
+    'hint.udp': 'Send to the remote IP / port, receive on the local address / port (local port 0 = auto).',
+
+    'log.openFail': ' failed: ',
+    'log.opened': '{word}: ',
+    'log.closed': 'Disconnected',
+    'log.pausedDrop': '({size} dropped while paused)',
+    'log.noDesktop': 'Not running as a desktop app — features unavailable.',
+
+    'misc.yes': 'Yes',
+    'misc.no': 'No'
+  }
+};
+
+/* ------------------------------------------------------------------------ */
+
+let CUR_LANG = 'zh';
+
+/** 取当前语言下的文案；支持 {name} 占位替换 */
+function t(key, vars) {
+  const dict = I18N[CUR_LANG] || I18N.zh;
+  let s = dict[key];
+  if (s === undefined) s = (I18N.zh[key] !== undefined ? I18N.zh[key] : key);
+  if (vars) {
+    Object.keys(vars).forEach(function (k) {
+      s = s.split('{' + k + '}').join(String(vars[k]));
+    });
+  }
+  return s;
+}
+
+/** 把整页带 data-i18n 标记的元素替换成当前语言 */
+function applyLang() {
+  document.documentElement.setAttribute('lang', CUR_LANG === 'zh' ? 'zh-CN' : 'en');
+
+  document.querySelectorAll('[data-i18n]').forEach(function (el) {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(function (el) {
+    el.title = t(el.dataset.i18nTitle);
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
+    el.placeholder = t(el.dataset.i18nPh);
+  });
+
+  document.title = t('app.name');
+}
+
+function setLang(lang, persist) {
+  CUR_LANG = (lang === 'en') ? 'en' : 'zh';
+  if (persist !== false) {
+    try { localStorage.setItem('dfy.lang', CUR_LANG); } catch (_) { }
+  }
+  applyLang();
+}
+
+function getLang() { return CUR_LANG; }

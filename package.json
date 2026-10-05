@@ -1,0 +1,59 @@
+{
+  "name": "dafeiyu-serial-assistant",
+  "productName": "大肥鱼串口助手",
+  "version": "1.0.0",
+  "description": "大肥鱼串口助手 — 串口 / TCP / UDP 调试工具，支持中文双语界面",
+  "main": "src/main.js",
+  "author": "MYX <https://github.com/MYX-0211>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.myx.serialstudio",
+    "productName": "大肥鱼串口助手",
+    "artifactName": "DaFeiYu-Serial-Assistant-${version}-portable.${ext}",
+    "compression": "maximum",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/{.git,.github,test,tests,doc,docs,example,examples}/**"
+    ],
+    "asar": true,
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@serialport/bindings-cpp/prebuilds/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    }
+  }
+}

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; font-src 'self';">
+<title>大肥鱼串口助手</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="bg"></div>
+
+<div id="app">
+
+  <!-- ===================== 顶部：模式 + 参数 ===================== -->
+  <div class="topbar">
+    <div class="params">
+      <select class="field mode" id="modeSel" data-i18n-title="tip.mode">
+        <option value="" data-i18n="mode.scanning">扫描中…</option>
+      </select>
+      <button class="mini-btn icon" id="btnRefresh" data-i18n-title="tip.refresh">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      </button>
+
+      <!-- 串口参数 -->
+      <span class="opts" id="serialOpts">
+        <input class="field" id="baudRate" list="baudList" value="115200" data-i18n-title="tip.baud"
+               inputmode="numeric" autocomplete="off" spellcheck="false">
+        <datalist id="baudList">
+          <option value="1200"></option><option value="2400"></option><option value="4800"></option>
+          <option value="9600"></option><option value="19200"></option><option value="38400"></option>
+          <option value="57600"></option><option value="115200"></option><option value="128000"></option>
+          <option value="230400"></option><option value="256000"></option><option value="460800"></option>
+          <option value="921600"></option><option value="1500000"></option><option value="2000000"></option>
+        </datalist>
+        <select class="field" id="dataBits" data-i18n-title="tip.dataBits">
+          <option value="8" selected data-i18n="db.8">8 位</option>
+          <option value="7" data-i18n="db.7">7 位</option>
+          <option value="6" data-i18n="db.6">6 位</option>
+          <option value="5" data-i18n="db.5">5 位</option>
+        </select>
+        <select class="field" id="stopBits" data-i18n-title="tip.stopBits">
+          <option value="1" selected data-i18n="sb.1">1 位</option>
+          <option value="1.5" data-i18n="sb.1.5">1.5 位</option>
+          <option value="2" data-i18n="sb.2">2 位</option>
+        </select>
+        <select class="field" id="parity" data-i18n-title="tip.parity">
+          <option value="none" selected data-i18n="parity.none">无校验</option>
+          <option value="even" data-i18n="parity.even">偶校验</option>
+          <option value="odd" data-i18n="parity.odd">奇校验</option>
+          <option value="mark">Mark</option><option value="space">Space</option>
+        </select>
+        <select class="field" id="flowCtrl" data-i18n-title="tip.flow">
+          <option value="none" selected data-i18n="flow.none">无流控</option>
+          <option value="rtscts">RTS/CTS</option>
+          <option value="xonxoff">XON/XOFF</option>
+        </select>
+        <label class="chk"><input type="checkbox" id="dtrChk" checked> DTR</label>
+        <label class="chk"><input type="checkbox" id="rtsChk"> RTS</label>
+      </span>
+
+      <!-- 网络参数：远程（对端）+ 本地（本机网卡 / 端口） -->
+      <span class="opts" id="netOpts" hidden>
+        <label class="fld" id="netRemoteWrap"><span data-i18n="net.remote">远程</span>
+          <input class="field net" id="netHost" placeholder="192.168.1.100" data-i18n-title="tip.remoteHost" spellcheck="false">
+        </label>
+        <input class="field num" id="netPort" value="8080" data-i18n-title="tip.remotePort" inputmode="numeric">
+        <label class="fld" id="netBindWrap"><span data-i18n="net.local">本地</span>
+          <select class="field" id="netLocalAddr" data-i18n-title="tip.localAddr"></select>
+        </label>
+        <input class="field num" id="netLocalPort" value="8080" data-i18n-title="tip.localPort" inputmode="numeric">
+      </span>
+
+      <span class="spacer"></span>
+
+      <button class="btn primary" id="btnOpen"><span id="btnOpenText" data-i18n="btn.open">打开</span></button>
+      <button class="mini-btn lang" id="btnLang" data-i18n-title="tip.lang"><span id="langLabel">EN</span></button>
+      <button class="mini-btn icon" id="btnTools" data-i18n-title="tip.tools">
+        <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
+      </button>
+      <button class="mini-btn icon" id="btnHelp" data-i18n-title="tip.help">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 1 1 4 2.8c-.7.3-1.1 1-1.1 1.7v.5"/><path d="M12 17.5h.01"/></svg>
+      </button>
+    </div>
+    <div class="sub" id="hint"></div>
+  </div>
+
+  <!-- ===================== 主体：接收区 + 多条字符串 ===================== -->
+  <div class="main">
+    <div class="pane">
+      <div class="pane-head">
+        <span class="title" data-i18n="pane.rx">接收区</span>
+        <span class="badge" id="rxBadge">0</span>
+        <span class="spacer"></span>
+        <button class="mini-btn icon" id="btnBottom" data-i18n-title="tip.bottom">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>
+        </button>
+        <button class="mini-btn icon" id="btnSave" data-i18n-title="tip.save">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+        </button>
+        <button class="mini-btn icon" id="btnClear" data-i18n-title="tip.clearRx">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>
+        </button>
+      </div>
+
+      <div class="log-wrap">
+        <div id="log"></div>
+        <div class="empty" id="logEmpty">
+          <div class="box">
+            <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 12h2l1.5-3 2 6 1.5-3h5"/></svg>
+            <p data-i18n="rx.empty">选好模式后点「打开」，数据会显示在这里</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="optbar">
+        <label class="chk"><input type="checkbox" id="chkHexView"> <span data-i18n="rx.hex">HEX</span></label>
+        <label class="chk"><input type="checkbox" id="chkTimestamp"> <span data-i18n="rx.timestamp">时间戳</span></label>
+        <label class="chk"><input type="checkbox" id="chkEcho"> <span data-i18n="rx.echo">显示发送</span></label>
+        <label class="chk"><input type="checkbox" id="chkAutoWrap" checked> <span data-i18n="rx.wrap">自动换行</span></label>
+        <label class="chk"><input type="checkbox" id="chkPacket" checked> <span data-i18n="rx.packet">分包显示</span></label>
+        <label class="chk" data-i18n-title="rx.gapTip"><span data-i18n="rx.gap">超时</span>
+          <input class="field num" id="pktGap" type="number" min="1" max="5000" value="20"> ms</label>
+        <label class="chk" data-i18n-title="rx.encodingTip"><span data-i18n="rx.encoding">编码</span>
+          <select class="field" id="selEncoding">
+            <option value="utf-8" selected>UTF-8</option>
+            <option value="gbk">GBK</option>
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <button class="mini-btn" id="btnPause"><span data-i18n="rx.pause">暂停</span></button>
+      </div>
+    </div>
+
+    <div class="pane pane-right">
+      <div class="pane-head">
+        <span class="title" data-i18n="pane.cmds">多条字符串发送</span>
+        <span class="spacer"></span>
+        <button class="mini-btn icon" id="btnAddCmd" data-i18n-title="tip.addCmd">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+
+      <div class="cmd-list" id="cmdList"></div>
+
+      <div class="optbar">
+        <label class="chk"><span data-i18n="cmd.interval">间隔</span>
+          <input class="field num" id="cmdLoopMs" type="number" min="1" max="600000" value="1000"> ms</label>
+        <label class="chk"><input type="checkbox" id="chkCmdLoop"> <span data-i18n="cmd.loop">循环</span></label>
+        <span class="spacer"></span>
+        <button class="mini-btn primary" id="btnSendAll" data-i18n="cmd.sendAll">全部发送</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== 发送区 ===================== -->
+  <div class="pane" id="sendArea">
+    <div class="resize-bar" id="resizeBar"><i></i></div>
+    <div class="pane-head">
+      <span class="title" data-i18n="pane.tx">发送区</span>
+      <span class="spacer"></span>
+      <span class="hint" id="sendInfo">0</span>
+    </div>
+    <div class="send-body">
+      <textarea class="field" id="sendText" spellcheck="false" data-i18n-ph="tx.phAsc"></textarea>
+      <div class="send-side">
+        <button class="btn primary" id="btnSend" data-i18n="btn.send">发送</button>
+        <button class="btn" id="btnSendFile" data-i18n="btn.sendFile">发送文件</button>
+      </div>
+    </div>
+    <div class="optbar">
+      <label class="chk"><input type="checkbox" id="chkSendHex"> <span data-i18n="tx.sendHex">HEX 发送</span></label>
+      <label class="chk"><input type="checkbox" id="chkNewline" checked> <span data-i18n="tx.newline">发送新行</span></label>
+      <select class="field" id="selNewline">
+        <option value="rn" selected>CRLF</option><option value="n">LF</option><option value="r">CR</option>
+      </select>
+      <select class="field" id="selChecksum">
+        <option value="none" selected data-i18n="ck.none">不追加校验</option>
+        <option value="crc16modbus">Modbus CRC16</option>
+        <option value="crc16ccitt">CRC16-CCITT</option>
+        <option value="add8" data-i18n="ck.add8">累加和 ADD8</option>
+        <option value="xor8" data-i18n="ck.xor8">异或 XOR8</option>
+      </select>
+      <label class="chk" data-i18n-title="tip.keySend">
+        <input type="checkbox" id="chkKeySend"> <span data-i18n="tx.keySend">按键即发</span></label>
+      <label class="chk" data-i18n-title="tip.enterSend">
+        <input type="checkbox" id="chkEnterSend"> <span data-i18n="tx.enterSend">回车发送</span></label>
+      <label class="chk"><input type="checkbox" id="chkTimer"> <span data-i18n="tx.timer">定时发送</span></label>
+      <input class="field num" id="timerMs" type="number" min="10" max="600000" value="1000">
+      <span class="hint">ms</span>
+      <span class="spacer"></span>
+      <span class="hint" data-i18n="tx.hint">Ctrl+Enter 发送</span>
+    </div>
+    <input type="file" id="fileInput" style="display:none">
+  </div>
+
+  <!-- ===================== 状态栏 ===================== -->
+  <div class="statusbar">
+    <span class="sb"><span data-i18n="sb.rx">接收</span> <b class="rx" id="sbRx">0</b></span>
+    <span class="sb"><span data-i18n="sb.tx">发送</span> <b class="tx" id="sbTx">0</b></span>
+    <span class="sb"><span data-i18n="sb.pkt">包</span> <b id="sbPkt">0</b></span>
+    <span class="spacer"></span>
+    <span class="sb" id="sbPort" data-i18n="sb.idle">未连接</span>
+    <button class="mini-btn" id="btnResetStat" data-i18n="sb.reset">清空计数</button>
+    <span class="brand" id="brand">大肥鱼串口助手 · MYX</span>
+  </div>
+</div>
+
+<!-- ===================== 校验计算器 ===================== -->
+<div class="modal-mask" id="extModal">
+  <div class="modal tool-modal">
+    <div class="pane-head">
+      <span class="title" data-i18n="tool.title">校验计算器</span>
+      <span class="spacer"></span>
+      <span class="hint" id="extHint"></span>
+      <button class="mini-btn" id="btnExtClose" data-i18n="tool.close">关闭</button>
+    </div>
+    <div class="tool-body">
+      <textarea class="field mono" id="toolInput" spellcheck="false" data-i18n-ph="tool.ph"></textarea>
+      <div class="optbar">
+        <button class="mini-btn on" data-algo="crc16modbus">Modbus CRC16</button>
+        <button class="mini-btn" data-algo="crc16ccitt">CRC16-CCITT</button>
+        <button class="mini-btn" data-algo="add8" data-i18n="ck.add8">累加和 ADD8</button>
+        <button class="mini-btn" data-algo="xor8" data-i18n="ck.xor8">异或 XOR8</button>
+        <button class="mini-btn" data-algo="all" data-i18n="ck.all">全部</button>
+      </div>
+      <div class="tool-out" id="toolResult" data-i18n="tool.waiting">等待输入…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 使用说明 ===================== -->
+<div class="modal-mask" id="helpModal">
+  <div class="modal help-modal">
+    <div class="pane-head">
+      <span class="title" data-i18n="help.title">使用说明</span>
+      <span class="spacer"></span>
+      <button class="mini-btn" id="btnHelpClose" data-i18n="tool.close">关闭</button>
+    </div>
+    <div class="card-body">
+      <h3 data-i18n="help.modes">三种连接模式</h3>
+      <ul>
+        <li><b data-i18n="help.serial">串口</b><span data-i18n="help.serialDesc">—— 下拉列表里直接选 COM 口，插拔设备会自动刷新。</span></li>
+        <li><b data-i18n="help.tcpClient">TCP Client</b><span data-i18n="help.tcpClientDesc">—— 作为客户端连接「远程 IP + 端口」。</span></li>
+        <li><b data-i18n="help.tcpServer">TCP Server</b><span data-i18n="help.tcpServerDesc">—— 用「本地」地址 + 端口在本机监听。</span><b data-i18n="help.localHint">本地地址建议选「全部网卡」</b><span data-i18n="help.localHint2">，这样所有网卡都能连进来；若指定具体某张网卡，只有该网段能连。</span></li>
+        <li><b data-i18n="help.udp">UDP</b><span data-i18n="help.udpDesc">—— 用「本地」地址 + 端口绑定收包，往「远程 IP + 端口」发包（本地端口填 0 表示自动分配）。</span></li>
+      </ul>
+
+      <h3 data-i18n="help.rxTitle">接收区</h3>
+      <ul>
+        <li data-i18n="help.rx1">「分包显示」默认开启：超过设定超时（默认 20 ms）没有新数据就换行，便于分辨一帧一帧的数据。</li>
+        <li data-i18n="help.rx2">滚动条在底部时会自动跟随新数据；往上翻看历史时不会被打断，点右下角箭头可回到底部。</li>
+        <li data-i18n="help.rx3">HEX 输入允许空格、逗号、0x 前缀，大小写不限。</li>
+        <li><b data-i18n="help.gbk">中文乱码</b><span data-i18n="help.gbk2">？把接收区的「编码」从 UTF-8 切到 GBK —— Keil 工程里的中文字符串默认就是 GBK 编码。</span></li>
+      </ul>
+
+      <h3 data-i18n="help.cmdTitle">多条字符串发送</h3>
+      <ul>
+        <li data-i18n="help.cmd1">直接在右侧输入框里改内容，改完自动保存；输入框里按 Enter 直接发送。</li>
+        <li data-i18n="help.cmd2">点每条后面的 ASC / HEX 标签，切换这一条按文本还是十六进制发送。</li>
+        <li data-i18n="help.cmd3">「全部发送」按顺序发一遍；勾上「循环」按设定间隔轮流发送。</li>
+      </ul>
+
+      <h3 data-i18n="help.keyTitle">按键即发 / 回车发送</h3>
+      <ul>
+        <li data-i18n="help.key1">按键即发：勾上后，在发送框里每敲一个字符就立刻发出去，输入框同时保留内容方便你看。和设备做终端式交互（比如敲 Shell 命令）时很顺手；退格键会发送 0x08。</li>
+        <li data-i18n="help.key2">回车发送：勾上后，在发送框里按 Enter 直接发出当前内容并清空输入框；想换行用 Shift + Enter。</li>
+        <li data-i18n="help.key3">两者可以同时开：边敲边发，回车补一个换行结束这一行。</li>
+        <li data-i18n="help.key4">没勾选时，Enter 就是普通换行，用 Ctrl + Enter 发送。</li>
+      </ul>
+
+      <h3 data-i18n="help.shortcut">快捷键</h3>
+      <ul>
+        <li data-i18n="help.sc1">Ctrl + Enter 发送　Ctrl + K 清空接收区　Ctrl + Shift + L 清空发送框</li>
+        <li data-i18n="help.sc2">Ctrl + 鼠标滚轮 调整接收区字号　Esc 关闭弹窗并停止定时 / 循环发送</li>
+        <li data-i18n="help.sc3">把文件拖到窗口上 = 按 256 字节分包发送该文件</li>
+      </ul>
+    </div>
+    <div class="modal-foot">
+      <button class="mini-btn" id="btnAbout" data-i18n="help.about">软件信息</button>
+      <span class="spacer"></span>
+      <button class="mini-btn primary" id="btnHelpOk" data-i18n="help.ok">知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== 关于 ===================== -->
+<div class="modal-mask" id="aboutModal">
+  <div class="modal about-modal">
+    <div class="pane-head">
+      <span class="title" data-i18n="help.aboutTitle">关于</span>
+      <span class="spacer"></span>
+      <button class="mini-btn" id="btnAboutClose" data-i18n="tool.close">关闭</button>
+    </div>
+    <div class="about-body">
+      <img class="about-icon" src="assets/app-icon.png" alt="">
+      <div class="about-name" data-i18n="app.name">大肥鱼串口助手</div>
+      <div class="about-tag" data-i18n="app.tagline">串口 / TCP / UDP 调试工具</div>
+      <dl class="about-meta">
+        <dt data-i18n="help.author">作者</dt><dd>MYX</dd>
+        <dt data-i18n="help.source">开源地址</dt>
+        <dd><a href="https://github.com/MYX-0211" target="_blank" rel="noreferrer">github.com/MYX-0211</a></dd>
+        <dt data-i18n="help.version">版本</dt><dd id="aboutVer">-</dd>
+      </dl>
+    </div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<div id="loading"><div class="box"><div class="ring"></div></div></div>
+
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

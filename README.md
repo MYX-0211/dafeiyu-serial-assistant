@@ -68,7 +68,7 @@ exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 
 
 ## 快速开始
 
-1. 从 [Releases](../../releases) 下载 `大肥鱼串口助手-v2.1.7.exe`
+1. 从 [Releases](../../releases) 下载 `DaFeiYu-v2.1.7.exe`
 2. 双击运行 —— **真的免安装**，不需要解压、不需要等
 3. 顶部下拉框选模式，点「打开 / 连接 / 侦听」
 
@@ -210,7 +210,7 @@ so the two never fight over memory.
 
 ## Quick start
 
-1. Download `大肥鱼串口助手-v2.1.7.exe` from [Releases](../../releases)
+1. Download `DaFeiYu-v2.1.7.exe` from [Releases](../../releases)
 2. Double-click — genuinely portable, no install, no extraction wait
 3. Pick a mode, hit **Open / Connect / Listen**
 

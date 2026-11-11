@@ -437,10 +437,15 @@ async function refreshLocalIPs() {
 async function refreshPorts(showToast) {
   if (!NATIVE) return;
   try {
-    S.ports = await NATIVE.listPorts();
+    const r = await NATIVE.listPorts();
+    S.ports = Array.isArray(r) ? r : [];
     renderModeOptions();
     if (showToast) toast(t('toast.scanned', { n: S.ports.length }));
   } catch (e) {
+    // 后端现在会带上「串口枚举失败：…」的原始原因，
+    // 不再是静默的空列表 —— 这样「驱动异常」和「没插设备」能区分开
+    S.ports = [];
+    renderModeOptions();
     toast(t('toast.scanFail') + (e.message || e), 'err');
   }
 }
@@ -517,6 +522,7 @@ async function openLink() {
     const msg = (r && r.error) || 'unknown error';
     toast(t('toast.openFail', { word: busyWord() }) + msg, 'err', 5200);
     queueLog(t('toast.openFail', { word: busyWord() }) + msg, 'err', true); flushLog();
+    flashLinkError();
     return;
   }
   S.isOpen = true;
@@ -545,6 +551,7 @@ async function closeLink(silent) {
     stopTimerSend();
     stopLoopSend();
     rxDec = new TextDecoder(S.encoding, { fatal: false });
+    resetPauseUI();
     setConnectedUI(false);
   }
   if (!silent && hadLink) {
@@ -585,10 +592,42 @@ function applyRxView() {
   }
 }
 
+/* 连接状态徽章：idle（灰）/ open（绿）/ paused（橙）/ error（红）
+   原来这个状态只写在状态栏右下角的淡灰小字里，几乎看不见。 */
+function setLinkState(state, text) {
+  const el = $('linkState');
+  if (!el) return;
+  el.dataset.state = state;
+  const label = text || (state === 'open' ? (S.openLabel || t('sb.rx')) : t('sb.idle'));
+  $('linkStateText').textContent = label;
+}
+
+/* 断开时复位「暂停」：否则重连后仍停在暂停态，界面写着「继续」却一直接不到数据 */
+function resetPauseUI() {
+  if (!S.paused) return;
+  S.paused = false;
+  logWrap.classList.remove('paused');
+  const btn = $('btnPause');
+  if (btn) btn.classList.remove('on');
+  const txt = $('btnPauseText');
+  if (txt) txt.textContent = t('rx.pause');
+}
+
+/* 出错时红一下，2.6s 后没连上就退回灰色，避免红点一直挂着 */
+function flashLinkError(msg) {
+  setLinkState('error', msg || t('sb.err'));
+  setTimeout(function () {
+    if (!S.isOpen) setLinkState('idle');
+    else setLinkState(S.paused ? 'paused' : 'open');
+  }, 2600);
+}
+
 function setConnectedUI(on) {
-  $('sbPort').textContent = on ? (S.openLabel || t('sb.rx')) : t('sb.idle');
+  /* 未连接时状态栏留空：顶部徽章已经写了「未连接」，这里只放链路详情，不重复 */
+  $('sbPort').textContent = on ? (S.openLabel || '') : '';
+  setLinkState(on ? (S.paused ? 'paused' : 'open') : 'idle');
   $('btnOpenText').textContent = on ? modeWord().on : modeWord().off;
-  ['modeSel', 'btnRefresh', 'baudRate', 'dataBits', 'stopBits', 'parity', 'flowCtrl',
+  ['modeSel', 'btnRefresh', 'btnBaud', 'baudRate', 'dataBits', 'stopBits', 'parity', 'flowCtrl',
    'dtrChk', 'rtsChk', 'netHost', 'netPort', 'netLocalAddr', 'netLocalPort']
     .forEach(function (id) { const el = $(id); if (el) el.disabled = on; });
   updateHint();
@@ -721,6 +760,9 @@ async function saveLog() {
 function setChip(el, on) {
   el.dataset.on = on ? '1' : '0';
   el.classList.toggle('on', !!on);
+  /* 这些开关是 <input type="checkbox">，原生勾选状态必须一起同步。
+     只改 dataset/class 的话，恢复记忆值后会出现「功能开着但方框没勾」的错位。 */
+  if (el.type === 'checkbox') el.checked = !!on;
 }
 function bindToggle(el, initial, onChange) {
   setChip(el, initial);
@@ -997,6 +1039,8 @@ function refreshAfterLangChange() {
   renderModeOptions();
   renderCmds();
   setConnectedUI(S.isOpen);
+  $('btnPauseText').textContent = S.paused ? t('rx.resume') : t('rx.pause');
+  $('btnBg').title = t('tip.bg') + ' · ' + t('bg.' + ($('app').dataset.bg || 'soft'));
   updateStats();
   updateSendInfo();
   runTool();
@@ -1013,12 +1057,13 @@ function bindAll() {
   $('extModal').addEventListener('click', function (e) { if (e.target === this) closeModal(this); });
 
   /* ---------- 接收区显示选项 ---------- */
-  bindToggle($('chkHexView'), S.hexView, function (v) { S.hexView = v; });
-  bindToggle($('chkTimestamp'), S.ts, function (v) { S.ts = v; });
-  bindToggle($('chkPacket'), S.packet, function (v) { S.packet = v; });
-  bindToggle($('chkEcho'), S.echo, function (v) { S.echo = v; });
+  bindToggle($('chkHexView'), S.hexView, function (v) { S.hexView = v; LS.set('dfy.hexView', v); });
+  bindToggle($('chkTimestamp'), S.ts, function (v) { S.ts = v; LS.set('dfy.ts', v); });
+  bindToggle($('chkPacket'), S.packet, function (v) { S.packet = v; LS.set('dfy.packet', v); });
+  bindToggle($('chkEcho'), S.echo, function (v) { S.echo = v; LS.set('dfy.echo', v); });
   bindToggle($('chkAutoWrap'), S.autoWrap, function (v) {
     S.autoWrap = v;
+    LS.set('dfy.autoWrap', v);
     logEl.classList.toggle('nowrap', !v);
   });
 
@@ -1036,13 +1081,13 @@ function bindAll() {
   });
 
   /* ---------- 接收区按钮 ---------- */
-  const SVG_PAUSE = '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>';
-  const SVG_PLAY = '<svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>';
   $('btnPause').addEventListener('click', function () {
     S.paused = !S.paused;
     logWrap.classList.toggle('paused', S.paused);
     this.classList.toggle('on', S.paused);
-    this.textContent = S.paused ? t('rx.resume') : t('rx.pause');
+    /* 按钮里除文字还有两个 svg（暂停 / 继续），所以只改 span，不能整个 textContent */
+    $('btnPauseText').textContent = S.paused ? t('rx.resume') : t('rx.pause');
+    setLinkState(S.paused ? 'paused' : (S.isOpen ? 'open' : 'idle'));
     if (!S.paused && S.dropped) {
       queueLog(t('log.pausedDrop', { size: fmtSize(S.dropped) }), 'sys', true);
       S.dropped = 0; flushLog();
@@ -1059,6 +1104,9 @@ function bindAll() {
 
   /* ---------- 模式 / 连接 ---------- */
   $('btnRefresh').addEventListener('click', function () { refreshPorts(true); });
+  /* 兜底：从别的窗口切回来时重扫一次。
+     正常路径是后端轮询 push 的 link:ports-changed，这里只防推送失效 */
+  window.addEventListener('focus', function () { refreshPorts(false); });
   $('modeSel').addEventListener('change', function () {
     applyModeUI();
     updateHint();
@@ -1074,6 +1122,74 @@ function bindAll() {
     LS.set('serialstudio.netLocalAddr', this.value);
     updateHint();
   });
+
+  /* ---------- 波特率下拉 ----------
+     原生 datalist 会拿输入框里已有的值去过滤，框里是 115200 时点箭头只剩一条，
+     必须先删空才看得到全部。这里自己弹一个不受过滤影响的面板，并记住上次的值。 */
+  (function initBaudCombo() {
+    const inp = $('baudRate');
+    const pop = $('baudPop');
+    const btn = $('btnBaud');
+    let isOpen = false;
+
+    /* 原来的 <datalist> 已经删掉：它在 WebView2 里会再画一个下拉箭头，
+       和这个按钮挤在一起，看着很臃肿。列表统一在这里维护。 */
+    const BAUDS = ['1200', '2400', '4800', '9600', '19200', '38400', '57600', '115200',
+                   '128000', '230400', '256000', '460800', '921600', '1500000', '2000000'];
+
+    function values() {
+      return BAUDS;
+    }
+    function save() {
+      LS.set('dfy.baud', Number(inp.value) || 115200);
+    }
+    function closePop() {
+      pop.hidden = true;
+      isOpen = false;
+    }
+    function render() {
+      const cur = String(inp.value || '').trim();
+      pop.innerHTML = '';
+      values().forEach(function (v) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'combo-item' + (v === cur ? ' on' : '');
+        b.textContent = v;
+        b.addEventListener('click', function () {
+          inp.value = v;
+          closePop();
+          save();
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        pop.appendChild(b);
+      });
+    }
+    function openPop() {
+      if (inp.disabled) return;
+      render();
+      pop.hidden = false;
+      isOpen = true;
+      const on = pop.querySelector('.combo-item.on');
+      /* 面板刚显示出来时还没有布局，等一帧再滚动到当前值 */
+      if (on) setTimeout(function () { on.scrollIntoView({ block: 'nearest' }); }, 0);
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (isOpen) closePop(); else openPop();
+    });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (!isOpen) openPop(); }
+      else if (e.key === 'Escape' && isOpen) { closePop(); }
+    });
+    inp.addEventListener('change', save);
+    document.addEventListener('click', function (e) {
+      if (!isOpen) return;
+      /* 点组合框内部（输入框 / 箭头 / 面板）都不算「点外面」 */
+      if (e.target && e.target.closest && e.target.closest('#baudCombo')) return;
+      closePop();
+    });
+  })();
   $('btnOpen').addEventListener('click', function () {
     /* 万一还卡在「打开中」，允许点一下强制复位，不至于彻底点不动 */
     if (S.opening) {
@@ -1259,6 +1375,24 @@ function bindAll() {
   $('btnAboutClose').addEventListener('click', function () { closeModal($('aboutModal')); });
   $('aboutModal').addEventListener('click', function (e) { if (e.target === this) closeModal(this); });
 
+  /* ---------- 背景浓度：淡 → 浓 → 关 循环 ----------
+     背景图透多少属于口味，写死总有人不满意，所以给个三档开关。 */
+  const BG_LEVELS = ['soft', 'strong', 'off'];
+  let bgLevel = LS.get('dfy.bgLevel', 'soft');
+  if (BG_LEVELS.indexOf(bgLevel) < 0) bgLevel = 'soft';
+
+  function applyBgLevel() {
+    $('app').dataset.bg = bgLevel;
+    LS.set('dfy.bgLevel', bgLevel);
+    $('btnBg').title = t('tip.bg') + ' · ' + t('bg.' + bgLevel);
+  }
+  $('btnBg').addEventListener('click', function () {
+    bgLevel = BG_LEVELS[(BG_LEVELS.indexOf(bgLevel) + 1) % BG_LEVELS.length];
+    applyBgLevel();
+    toast(t('toast.bg') + t('bg.' + bgLevel));
+  });
+  applyBgLevel();
+
   /* ---------- 顶栏 / 弹窗 ---------- */
   $('btnHelp').addEventListener('click', function () { openModal($('helpModal')); });
   $('btnHelpClose').addEventListener('click', function () { closeModal($('helpModal')); });
@@ -1352,6 +1486,7 @@ function bindNativeEvents() {
     S.isOpen = false;
     S.openLabel = '';
     stopTimerSend();
+    resetPauseUI();
     setConnectedUI(false);
     const why = (info && info.reason) || '连接已断开';
     queueLog(why, 'err', true); flushLog();
@@ -1361,6 +1496,7 @@ function bindNativeEvents() {
   NATIVE.onError(function (msg) {
     queueLog(msg, 'err', true); flushLog();
     toast(msg, 'err', 4200);
+    flashLinkError();
   });
 }
 
@@ -1402,6 +1538,17 @@ async function init() {
   $('selEncoding').value = S.encoding;
 
   $('brand').textContent = t('app.name') + ' · MYX';
+
+  /* 接收区显示选项：全部记忆。
+     时间戳默认开 —— 串口调试基本都要对着时间看数据，
+     之前这几个开关只存在内存里，重启就回到默认，等于「勾了也白勾」。 */
+  S.hexView = LS.get('dfy.hexView', false) === true;
+  S.ts = LS.get('dfy.ts', true) === true;
+  S.packet = LS.get('dfy.packet', true) === true;
+  S.echo = LS.get('dfy.echo', false) === true;
+  S.autoWrap = LS.get('dfy.autoWrap', true) === true;
+  /* 上次用的波特率（调试时基本固定一个值，每次回到 115200 太折腾） */
+  $('baudRate').value = String(LS.get('dfy.baud', 115200) || 115200);
 
   if (window.ChartView) ChartView.init();
   recLoadOpts();

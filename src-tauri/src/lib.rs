@@ -341,27 +341,43 @@ fn extract_code(text: &str) -> String {
 //  命令：枚举串口
 // ==========================================================================
 
-#[tauri::command]
-fn list_ports() -> Vec<PortInfo> {
-    let mut list: Vec<PortInfo> = serialport::available_ports()
-        .unwrap_or_default()
+/// 从 "USB-SERIAL CH340 (COM7)" 里剥掉末尾的 " (COM7)"。
+/// 界面上已经显示成「COM7 · 名称」，再带一遍 COM 号就重复了。
+fn strip_com_suffix(s: &str) -> String {
+    if let Some(idx) = s.rfind(" (COM") {
+        if idx > 0 && s.ends_with(')') {
+            return s[..idx].to_string();
+        }
+    }
+    s.to_string()
+}
+
+/// 真正的枚举实现。
+///
+/// 这里返回 Result 而不是空列表：否则「驱动异常 / SetupAPI 失败」和
+/// 「确实没插设备」在界面上长得一模一样，问题永远没法自证。
+fn collect_ports() -> Result<Vec<PortInfo>, String> {
+    let raw = serialport::available_ports().map_err(|e| format!("串口枚举失败：{e}"))?;
+
+    let mut list: Vec<PortInfo> = raw
         .into_iter()
         .filter_map(|p| {
             let path = p.port_name;
             if path.is_empty() {
                 return None;
             }
-            let (manu, sn) = match &p.port_type {
+            let (manu, sn, name) = match &p.port_type {
                 serialport::SerialPortType::UsbPort(info) => (
                     info.manufacturer.clone().unwrap_or_default(),
                     info.serial_number.clone().unwrap_or_default(),
+                    strip_com_suffix(&info.product.clone().unwrap_or_default()),
                 ),
-                _ => (String::new(), String::new()),
+                _ => (String::new(), String::new(), String::new()),
             };
             Some(PortInfo {
                 path,
                 manufacturer: manu,
-                friendly_name: String::new(),
+                friendly_name: name,
                 serial_number: sn,
                 vendor_id: String::new(),
                 product_id: String::new(),
@@ -377,7 +393,42 @@ fn list_ports() -> Vec<PortInfo> {
             .parse::<u32>()
             .unwrap_or(0)
     });
-    list
+    Ok(list)
+}
+
+#[tauri::command]
+fn list_ports() -> Result<Vec<PortInfo>, String> {
+    collect_ports()
+}
+
+/// 后台轮询串口变化：新插入 / 拔掉都推 `link:ports-changed` 给前端。
+///
+/// 前端 app.js 里 onPortsChanged 的监听一直挂着，但后端从来没 emit 过这个事件，
+/// 所以「先开软件、后插模块」时列表永远是空的。这里把推送端补上。
+///
+/// 为什么用轮询而不是 WM_DEVICECHANGE：跨平台一致、代码量小，
+/// 1.5s 一次 SetupAPI 枚举在 Windows 上只有毫秒级开销。
+fn spawn_port_watcher(app: AppHandle) {
+    thread::spawn(move || {
+        let mut last: Vec<String> = collect_ports()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.path)
+            .collect();
+        loop {
+            thread::sleep(Duration::from_millis(1500));
+            let now = match collect_ports() {
+                Ok(v) => v,
+                // 偶发枚举失败时不要推空列表，否则界面上端口会凭空消失
+                Err(_) => continue,
+            };
+            let paths: Vec<String> = now.iter().map(|p| p.path.clone()).collect();
+            if paths != last {
+                last = paths;
+                let _ = app.emit("link:ports-changed", now);
+            }
+        }
+    });
 }
 
 // ==========================================================================
@@ -981,6 +1032,8 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_title("大肥鱼串口助手");
             }
+            // 热插拔监听：插拔 USB 转串口后前端能自动看到变化，不用手点刷新
+            spawn_port_watcher(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1049,7 +1102,7 @@ mod tests {
     /// 枚举串口不能 panic（有没有设备都要安全返回）
     #[test]
     fn list_ports_never_panics() {
-        let list = list_ports();
+        let list = list_ports().unwrap_or_default();
         for p in &list {
             assert!(!p.path.is_empty(), "串口 path 不应该为空");
         }
@@ -1058,6 +1111,18 @@ mod tests {
             list.len(),
             list.iter().map(|p| p.path.as_str()).collect::<Vec<_>>()
         );
+    }
+
+    /// 产品名里的 " (COMx)" 后缀要剥掉，否则「COM7 · USB-SERIAL CH340 (COM7)」重复
+    #[test]
+    fn strip_com_suffix_works() {
+        assert_eq!(strip_com_suffix("USB-SERIAL CH340 (COM7)"), "USB-SERIAL CH340");
+        assert_eq!(strip_com_suffix("USB-SERIAL CH340 (COM12)"), "USB-SERIAL CH340");
+        // 不含后缀的原样返回
+        assert_eq!(strip_com_suffix("USB-SERIAL CH340"), "USB-SERIAL CH340");
+        assert_eq!(strip_com_suffix(""), "");
+        // 括号里不是 COM 的不动
+        assert_eq!(strip_com_suffix("Adapter (Rev B)"), "Adapter (Rev B)");
     }
 
     // ---------------- 真实 socket 行为 ----------------

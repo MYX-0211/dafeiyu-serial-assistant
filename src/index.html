@@ -25,15 +25,14 @@
 
       <!-- 串口参数 -->
       <span class="opts" id="serialOpts">
-        <input class="field" id="baudRate" list="baudList" value="115200" data-i18n-title="tip.baud"
-               inputmode="numeric" autocomplete="off" spellcheck="false">
-        <datalist id="baudList">
-          <option value="1200"></option><option value="2400"></option><option value="4800"></option>
-          <option value="9600"></option><option value="19200"></option><option value="38400"></option>
-          <option value="57600"></option><option value="115200"></option><option value="128000"></option>
-          <option value="230400"></option><option value="256000"></option><option value="460800"></option>
-          <option value="921600"></option><option value="1500000"></option><option value="2000000"></option>
-        </datalist>
+        <span class="combo" id="baudCombo">
+          <input class="field" id="baudRate" value="115200" data-i18n-title="tip.baud"
+                 inputmode="numeric" autocomplete="off" spellcheck="false">
+          <button class="combo-arrow" id="btnBaud" type="button" tabindex="-1" data-i18n-title="tip.baudList">
+            <svg viewBox="0 0 12 12"><path d="M3 4.5L6 7.5l3-3"/></svg>
+          </button>
+          <div class="combo-pop" id="baudPop" hidden></div>
+        </span>
         <select class="field" id="dataBits" data-i18n-title="tip.dataBits">
           <option value="8" selected data-i18n="db.8">8 位</option>
           <option value="7" data-i18n="db.7">7 位</option>
@@ -74,8 +73,15 @@
 
       <span class="spacer"></span>
 
+      <span class="link-state" id="linkState" data-state="idle" data-i18n-title="tip.linkState">
+        <i class="dot"></i>
+        <span id="linkStateText" data-i18n="sb.idle">未连接</span>
+      </span>
       <button class="btn primary" id="btnOpen"><span id="btnOpenText" data-i18n="btn.open">打开</span></button>
       <button class="mini-btn lang" id="btnLang" data-i18n-title="tip.lang"><span id="langLabel">EN</span></button>
+      <button class="mini-btn icon" id="btnBg" data-i18n-title="tip.bg">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>
+      </button>
       <button class="mini-btn icon" id="btnTools" data-i18n-title="tip.tools">
         <svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5"/><path d="M12 12v9"/><path d="M12 12L4 7.5"/></svg>
       </button>
@@ -102,17 +108,26 @@
         <span class="rec-info" id="recInfo" hidden></span>
 
         <span class="spacer"></span>
-        <button class="mini-btn icon rec-btn" id="btnRecord" data-i18n-title="tip.record">
+        <button class="mini-btn pause-btn" id="btnPause" data-i18n-title="tip.pause">
+          <svg class="ico-pause" viewBox="0 0 24 24"><rect x="7" y="5" width="3.5" height="14" rx="1"/><rect x="13.5" y="5" width="3.5" height="14" rx="1"/></svg>
+          <svg class="ico-resume" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg>
+          <span id="btnPauseText" data-i18n="rx.pause">暂停</span>
+        </button>
+        <button class="mini-btn icon with-txt rec-btn" id="btnRecord" data-i18n-title="tip.record">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+          <span data-i18n="btn.record">记录</span>
         </button>
-        <button class="mini-btn icon" id="btnBottom" data-i18n-title="tip.bottom">
+        <button class="mini-btn icon with-txt" id="btnBottom" data-i18n-title="tip.bottom">
           <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M6 13l6 6 6-6"/></svg>
+          <span data-i18n="btn.bottom">到底</span>
         </button>
-        <button class="mini-btn icon" id="btnSave" data-i18n-title="tip.save">
+        <button class="mini-btn icon with-txt" id="btnSave" data-i18n-title="tip.save">
           <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>
+          <span data-i18n="btn.save">保存</span>
         </button>
-        <button class="mini-btn icon" id="btnClear" data-i18n-title="tip.clearRx">
+        <button class="mini-btn icon with-txt" id="btnClear" data-i18n-title="tip.clearRx">
           <svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>
+          <span data-i18n="btn.clear">清空</span>
         </button>
       </div>
 
@@ -134,6 +149,7 @@
         <label class="chk"><input type="checkbox" id="chkEcho"> <span data-i18n="rx.echo">显示发送</span></label>
         <label class="chk"><input type="checkbox" id="chkAutoWrap" checked> <span data-i18n="rx.wrap">自动换行</span></label>
         <label class="chk"><input type="checkbox" id="chkPacket" checked> <span data-i18n="rx.packet">分包显示</span></label>
+        <span class="vb"></span>
         <label class="chk" data-i18n-title="rx.gapTip"><span data-i18n="rx.gap">超时</span>
           <input class="field num" id="pktGap" type="number" min="1" max="5000" value="20"> ms</label>
         <label class="chk" data-i18n-title="rx.encodingTip"><span data-i18n="rx.encoding">编码</span>
@@ -142,8 +158,6 @@
             <option value="gbk">GBK</option>
           </select>
         </label>
-        <span class="spacer"></span>
-        <button class="mini-btn" id="btnPause"><span data-i18n="rx.pause">暂停</span></button>
       </div>
     </div>
 
@@ -215,7 +229,7 @@
     <span class="sb"><span data-i18n="sb.tx">发送</span> <b class="tx" id="sbTx">0</b></span>
     <span class="sb"><span data-i18n="sb.pkt">包</span> <b id="sbPkt">0</b></span>
     <span class="spacer"></span>
-    <span class="sb" id="sbPort" data-i18n="sb.idle">未连接</span>
+    <span class="sb" id="sbPort"></span>
     <button class="mini-btn" id="btnResetStat" data-i18n="sb.reset">清空计数</button>
     <span class="brand" id="brand">大肥鱼串口助手 · MYX</span>
   </div>

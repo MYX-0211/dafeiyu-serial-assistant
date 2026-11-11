@@ -19,24 +19,24 @@
 
   /* ---- 底色 ---- */
   --bg: #EEF2F9;
-  --surface: rgba(255, 255, 255, .15);      /* 面板 */
+  --surface: rgba(255, 255, 255, .58);      /* 面板：默认「淡」，配 backdrop blur 压住背景花纹 */
   --surface-2: rgba(110, 134, 180, .11);    /* 面板内的浅块 */
   --panel-solid: rgba(252, 253, 255, .94);  /* 弹窗 / 浮层（要能看清） */
 
   /* ---- 描边 ---- */
   --edge: rgba(255, 255, 255, .96);         /* 玻璃边缘高光 */
-  --line: rgba(74, 100, 150, .13);
-  --field-line: rgba(74, 100, 150, .15);
+  --line: rgba(74, 100, 150, .20);
+  --field-line: rgba(74, 100, 150, .34);    /* 复选框/输入框边框：太淡会看不出「有没有勾」 */
 
   /* ---- 控件底 ---- */
   --field-bg: rgba(110, 134, 180, .10);
   --field-hover: rgba(110, 134, 180, .16);
-  --log-bg: rgba(255, 255, 255, .80);
+  --log-bg: rgba(255, 255, 255, .76);       /* 日志区：半透 + 强模糊，默认档背景隐约可见、字清晰 */
 
   /* ---- 文字 ---- */
   --text: #1B2740;
-  --text-dim: rgba(43, 62, 100, .68);
-  --text-faint: rgba(43, 62, 100, .44);
+  --text-dim: rgba(43, 62, 100, .84);
+  --text-faint: rgba(43, 62, 100, .64);
 
   /* ---- 系统色 ---- */
   --accent: #4A7BC8;
@@ -88,14 +88,17 @@ h3 { margin: 0; }
 #bg {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background: url("assets/bg.jpg") center 30% / auto 118% no-repeat;
+  /* 稍微压一点对比度：背景图里那块高亮的白衬衫透到面板上会变成一条竖带，
+     降 contrast 后人物还在，但不至于横穿日志区跟文字抢注意力 */
+  filter: contrast(.9) brightness(1.02) saturate(1.05);
 }
 #bg::after {
   content: ''; position: absolute; inset: 0;
   /* 只保留很薄的一层白纱，人物才看得见 */
   background: linear-gradient(112deg,
-    rgba(255, 255, 255, .24) 0%,
-    rgba(253, 254, 255, .12) 40%,
-    rgba(238, 244, 253, .02) 74%,
+    rgba(255, 255, 255, .14) 0%,
+    rgba(253, 254, 255, .07) 40%,
+    rgba(238, 244, 253, .01) 74%,
     rgba(226, 236, 251, .00) 100%);
 }
 
@@ -108,20 +111,23 @@ h3 { margin: 0; }
 /* ------------------------------ 顶栏 ----------------------------------- */
 .topbar {
   flex: none; padding: 8px 10px 5px; display: flex; flex-direction: column; gap: 3px;
+  /* backdrop-filter 会创建层叠上下文，导致里面的下拉面板被下面的 .main 盖住；
+     这里把整条顶栏抬到主体之上（仍低于弹窗 90 / toast 99） */
+  position: relative; z-index: 30;
   background: rgba(255, 255, 255, .70);
   -webkit-backdrop-filter: blur(26px) saturate(150%);
   backdrop-filter: blur(26px) saturate(150%);
   border-bottom: 1px solid var(--line);
 }
-.params { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; row-gap: 5px; }
+.params { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; row-gap: 5px; }
 .sub {
   font-size: 11px; color: var(--text-faint); min-height: 14px; line-height: 1.4;
   padding-left: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .opts { display: flex; align-items: center; gap: 6px; }
 .opts[hidden] { display: none; }
-#modeSel { width: 182px; }
-#baudRate { width: 72px; text-align: center; }
+#modeSel { width: 172px; }
+#baudRate { width: 92px; text-align: center; padding-left: 8px; padding-right: 22px; }
 #dataBits { width: 60px; }
 #stopBits { width: 60px; }
 #parity { width: 76px; }
@@ -181,8 +187,48 @@ select.field option { background: #fff; color: var(--text); }
 input[type="number"] { -moz-appearance: textfield; }
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family: var(--font-mono); background: var(--log-bg); }
+textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family: var(--font-mono); background: rgba(255, 255, 255, .88); }
 .field.mono { font-family: var(--font-mono); }
+
+/* --------------------------- 波特率组合框 -------------------------------- */
+/* 原生 <datalist> 会用输入框里已有的值去过滤候选项：框里写着 115200 时点箭头，
+   下拉里就只剩 115200 一条，必须先把内容删空才看得到全部。
+   所以这里把箭头换成自己的按钮，弹一个不受过滤影响的面板；
+   输入框本身仍可手打任意波特率（datalist 的输入补全也保留）。 */
+.combo { position: relative; display: inline-flex; align-items: center; }
+.combo-arrow {
+  position: absolute; right: 1px; top: 50%; transform: translateY(-50%);
+  width: 19px; height: 21px; display: grid; place-items: center;
+  border: 0; background: transparent; border-radius: 4px;
+  color: #8E8E93; cursor: pointer;
+  transition: background .15s var(--ease), color .15s var(--ease);
+}
+.combo-arrow:hover:not(:disabled) { background: rgba(74, 100, 150, .14); color: var(--text); }
+.combo-arrow:disabled { opacity: .45; cursor: not-allowed; }
+.combo-arrow svg {
+  width: 11px; height: 11px; stroke: currentColor; fill: none;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
+.combo-pop {
+  position: absolute; z-index: 60; top: calc(100% + 4px); left: 0;
+  min-width: 100%; max-height: min(410px, calc(100vh - 110px)); overflow: auto; padding: 4px;
+  border-radius: 9px; background: var(--panel-solid);
+  border: 1px solid var(--line); box-shadow: var(--shadow-pop);
+  animation: comboIn .14s var(--ease);
+}
+.combo-pop[hidden] { display: none; }
+@keyframes comboIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.combo-item {
+  display: block; width: 100%; text-align: left; padding: 5px 9px;
+  border: 0; border-radius: 6px; background: transparent; cursor: pointer;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.combo-item:hover { background: rgba(74, 123, 200, .13); }
+.combo-item.on { background: rgba(74, 123, 200, .18); color: var(--accent); font-weight: 600; }
 
 .mini-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
@@ -220,6 +266,33 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
 }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hi); box-shadow: 0 2px 4px rgba(0, 122, 255, .3), 0 8px 20px rgba(0, 122, 255, .28); }
 
+/* ------------------------- 连接状态徽章 --------------------------------- */
+/* 原来「未连接 / 已连接」只是状态栏里一行淡灰小字，藏在右下角。
+   链接状态是这类工具最关键的信息，挪到「打开」按钮左边，用颜色区分。 */
+.link-state {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  height: var(--ctl-h); padding: 0 10px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .2px; white-space: nowrap;
+  color: var(--text-dim); background: var(--surface-2); border: 1px solid var(--line);
+  transition: color .2s var(--ease), background .2s var(--ease), border-color .2s var(--ease);
+}
+.link-state .dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: none; background: #98A2B3;
+  transition: background .2s var(--ease), box-shadow .2s var(--ease);
+}
+.link-state[data-state="open"] {
+  color: #1E7A4F; background: rgba(62, 158, 110, .13); border-color: rgba(62, 158, 110, .34);
+}
+.link-state[data-state="open"] .dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(62, 158, 110, .18); }
+.link-state[data-state="paused"] {
+  color: #99630F; background: rgba(208, 138, 44, .15); border-color: rgba(208, 138, 44, .36);
+}
+.link-state[data-state="paused"] .dot { background: var(--warn); box-shadow: 0 0 0 3px rgba(208, 138, 44, .18); }
+.link-state[data-state="error"] {
+  color: #B23A36; background: rgba(217, 83, 79, .14); border-color: rgba(217, 83, 79, .36);
+}
+.link-state[data-state="error"] .dot { background: var(--err); box-shadow: 0 0 0 3px rgba(217, 83, 79, .18); }
+
 /* ------------------------------ 主体 ----------------------------------- */
 .main {
   flex: 1; min-height: 0; display: grid; gap: 8px;
@@ -232,8 +305,8 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  -webkit-backdrop-filter: blur(4px) saturate(150%);
-  backdrop-filter: blur(4px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(16px) saturate(160%);
 }
 .pane-head {
   flex: none; display: flex; align-items: center; gap: 7px;
@@ -246,7 +319,7 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
   background: var(--surface-2); font-variant-numeric: tabular-nums;
 }
 .optbar {
-  flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  flex: none; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   padding: 5px 9px; border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, .58);
 }
@@ -256,6 +329,10 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
 .log-wrap {
   flex: 1; min-height: 0; margin: 6px; position: relative; border-radius: 9px; overflow: hidden;
   background: var(--log-bg);
+  /* 背景图在日志区后面被压成柔和色块：既看得见氛围，又不跟文字抢注意力。
+     滚动的是 #log 子元素，backdrop 本身不变，所以这项不会拖慢滚动。 */
+  -webkit-backdrop-filter: blur(56px) saturate(170%);
+  backdrop-filter: blur(56px) saturate(170%);
   box-shadow: inset 0 0 0 1px var(--line);
   transition: box-shadow .25s var(--ease);
 }
@@ -330,7 +407,7 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
 .statusbar {
   flex: none; height: 30px; display: flex; align-items: center; gap: 14px;
   padding: 0 12px; font-size: 11.5px; color: var(--text-dim);
-  background: rgba(255, 255, 255, .70);
+  background: rgba(255, 255, 255, .72);
   -webkit-backdrop-filter: blur(26px) saturate(150%);
   backdrop-filter: blur(26px) saturate(150%);
   border-top: 1px solid var(--line); margin-top: 8px;
@@ -522,3 +599,59 @@ textarea.field { resize: none; line-height: 1.6; padding: 8px 10px; font-family:
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001s !important; transition-duration: .001s !important; }
 }
+
+/* ==========================================================================
+   可读性与交互增强（2.1.4）
+   --------------------------------------------------------------------------
+   1) 选项行里用竖线分组，把「显示选项」和「解析参数」分开
+   2) 接收区右上四个图标补文字，原来两个「向下箭头」分不清谁是谁
+   3) 暂停时整颗按钮变橙 —— 原来只有日志区一条很淡的橙框，几乎看不出来
+   ========================================================================== */
+
+.optbar .vb {
+  width: 1px; height: 14px; flex: none; margin: 0 3px; background: rgba(74, 100, 150, .55);
+}
+
+.mini-btn.icon.with-txt { width: auto; padding: 0 7px; gap: 4px; }
+.mini-btn.icon.with-txt svg { width: 12px; height: 12px; }
+.mini-btn.icon.with-txt span { font-size: 11px; font-weight: 500; }
+
+.pause-btn svg { fill: currentColor; stroke: none; }
+.pause-btn .ico-resume { display: none; }
+.mini-btn.pause-btn.on .ico-pause { display: none; }
+.mini-btn.pause-btn.on .ico-resume { display: block; }
+.mini-btn.pause-btn.on {
+  color: #fff; border-color: transparent; background: var(--warn);
+  box-shadow: 0 1px 2px rgba(208, 138, 44, .3), 0 3px 10px rgba(208, 138, 44, .22);
+}
+.mini-btn.pause-btn.on:hover:not(:disabled) { background: #E09A3C; color: #fff; }
+
+/* ==========================================================================
+   背景浓度（三档：淡 / 浓 / 关）
+   --------------------------------------------------------------------------
+   背景图透多少是口味问题，不该写死：
+     soft（默认）背景隐约可见，文字优先
+     strong      面板几乎透明，背景明显可见（靠强模糊兜住可读性）
+     off         纯白面板，只要最清晰的文字
+   只覆盖这几个 rgba，切档不动结构。
+   ========================================================================== */
+#app[data-bg="strong"] {
+  --surface: rgba(255, 255, 255, .34);
+  --log-bg: rgba(255, 255, 255, .42);
+}
+#app[data-bg="strong"] .pane-head { background: rgba(255, 255, 255, .34); }
+#app[data-bg="strong"] .optbar { background: rgba(255, 255, 255, .30); }
+#app[data-bg="strong"] .statusbar { background: rgba(255, 255, 255, .44); }
+#app[data-bg="strong"] .topbar { background: rgba(255, 255, 255, .42); }
+#app[data-bg="strong"] textarea.field { background: rgba(255, 255, 255, .80); }
+
+#app[data-bg="off"] {
+  --surface: rgba(255, 255, 255, .94);
+  --log-bg: rgba(255, 255, 255, .97);
+}
+#app[data-bg="off"] .pane-head { background: rgba(255, 255, 255, .96); }
+#app[data-bg="off"] .optbar { background: rgba(255, 255, 255, .94); }
+#app[data-bg="off"] .statusbar { background: rgba(255, 255, 255, .95); }
+#app[data-bg="off"] .topbar { background: rgba(255, 255, 255, .93); }
+/* 「关」档连面板之间的缝也盖白：缝里露的是背景图，会形成一条突兀的白带 */
+#app[data-bg="off"] .main { background: rgba(255, 255, 255, .90); border-radius: 14px; }

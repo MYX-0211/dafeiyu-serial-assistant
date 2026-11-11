@@ -1,0 +1,13 @@
+# 统一行尾：仓库内一律 LF，检出时按平台自动转换
+# Windows 上配合 core.autocrlf=true，本地工作区仍是 CRLF，不受影响
+* text=auto
+
+# 明确的二进制文件，别被当成文本处理
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.exe binary
+*.dll binary
+*.webp binary

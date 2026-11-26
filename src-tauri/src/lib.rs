@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -49,6 +49,9 @@ pub struct OpenConfig {
     pub parity: Option<String>,
     #[serde(default)]
     pub rtscts: Option<bool>,
+    /// XON/XOFF 软件流控（前端 flowCtrl 选 xonxoff 时为 true）
+    #[serde(default)]
+    pub xon: Option<bool>,
     #[serde(default)]
     pub dtr: Option<bool>,
     #[serde(default)]
@@ -87,7 +90,9 @@ impl OpenResult {
 enum Link {
     Serial(Box<dyn serialport::SerialPort>),
     TcpClient(TcpStream),
-    TcpServer { listener: TcpListener, client: Arc<Mutex<Option<TcpStream>>> },
+    /// 监听 socket 归接受线程所有（非阻塞轮询 + stop 标志），
+    /// 这里只留着「当前客户端」和代际号：代际号变了就说明这个客户端已经被顶掉 / 链路已关
+    TcpServer { client: Arc<Mutex<Option<TcpStream>>>, gen: Arc<AtomicU64> },
     Udp { sock: UdpSocket, remote: SocketAddr },
 }
 
@@ -95,6 +100,9 @@ struct Active {
     link: Link,
     /// 读线程靠它判断该不该退出
     stop: Arc<AtomicBool>,
+    /// TCP Server 专用：接受线程真正 drop 掉监听 socket 后会在这里说一声，
+    /// do_close 等到它再返回，保证「关了就能立刻用同一端口重新侦听」
+    closed: Option<mpsc::Receiver<()>>,
 }
 
 #[derive(Default)]
@@ -102,6 +110,9 @@ struct AppState {
     active: Mutex<Option<Active>>,
     /// 长时记录器（可选）：收到数据时直接落盘，不经过前端 DOM
     recorder: Arc<Mutex<Option<Recorder>>>,
+    /// 链路代际：open / close 各自 +1。open 是异步的，
+    /// 连接还在握手时用户又点了关闭，open 完成后一比对代际就能发现自己已过期
+    generation: AtomicU64,
 }
 
 impl AppState {
@@ -396,7 +407,8 @@ fn collect_ports() -> Result<Vec<PortInfo>, String> {
     Ok(list)
 }
 
-#[tauri::command]
+/// 枚举串口要走一遍 SetupAPI，几十毫秒是常事；放在主线程上点「刷新」会明显卡一下
+#[tauri::command(async)]
 fn list_ports() -> Result<Vec<PortInfo>, String> {
     collect_ports()
 }
@@ -437,9 +449,13 @@ fn spawn_port_watcher(app: AppHandle) {
 
 #[tauri::command]
 fn local_ips() -> Vec<String> {
-    let mut out = Vec::new();
-    if let Ok(ip) = local_ip_address::local_ip() {
-        out.push(ip.to_string());
+    // 只收 IPv4：前端「本地」下拉和 TCP Server 的绑定地址都只认 IPv4，
+    // local_ip() 在某些双栈机器上会先给出 IPv6 地址
+    let mut out: Vec<String> = Vec::new();
+    if let Ok(IpAddr::V4(v4)) = local_ip_address::local_ip() {
+        if !v4.is_loopback() {
+            out.push(v4.to_string());
+        }
     }
     // 再尽量补上其余网卡
     if let Ok(list) = local_ip_address::list_afinet_netifas() {
@@ -461,18 +477,31 @@ fn local_ips() -> Vec<String> {
 //  命令：打开 / 关闭 / 写
 // ==========================================================================
 
-#[tauri::command]
+/// 打开链路。
+///
+/// `#[tauri::command(async)]`：Tauri 里不带 async 的命令是在主线程（UI 线程）里跑的，
+/// 而 TCP 连接 `connect_timeout` 最长要等 8 秒、串口打开也可能卡几十毫秒 ——
+/// 放在主线程上整扇窗口都会白屏卡死。标成 async 后挪到运行时线程，界面保持响应。
+#[tauri::command(async)]
 fn open_link(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> OpenResult {
     // 先关掉旧的
     do_close(&state);
+    // 记下这次 open 的代际：关闭 / 再次打开都会让它过期
+    let generation = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
 
-    match cfg.mode.as_str() {
-        "serial" => open_serial(app, state, cfg),
-        "tcp-client" => open_tcp_client(app, state, cfg),
-        "tcp-server" => open_tcp_server(app, state, cfg),
-        "udp" => open_udp(app, state, cfg),
+    let result = match cfg.mode.as_str() {
+        "serial" => open_serial(app, state.clone(), cfg),
+        "tcp-client" => open_tcp_client(app, state.clone(), cfg),
+        "tcp-server" => open_tcp_server(app, state.clone(), cfg),
+        "udp" => open_udp(app, state.clone(), cfg),
         other => OpenResult::err(format!("不支持的模式：{}", other)),
+    };
+    // 连接还在握手时用户已经点了关闭 / 又点了打开：这次结果作废，别把界面拖回「已连接」
+    if state.generation.load(Ordering::SeqCst) != generation {
+        do_close(&state);
+        return OpenResult::err("已取消");
     }
+    result
 }
 
 fn open_serial(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> OpenResult {
@@ -496,16 +525,20 @@ fn open_serial(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> O
         7 => serialport::DataBits::Seven,
         _ => serialport::DataBits::Eight,
     };
+    // 前端只传一个布尔：rtscts = 硬件流控，xon = 软件流控（XON/XOFF）
+    let flow = if cfg.rtscts.unwrap_or(false) {
+        serialport::FlowControl::Hardware
+    } else if cfg.xon.unwrap_or(false) {
+        serialport::FlowControl::Software
+    } else {
+        serialport::FlowControl::None
+    };
 
     let builder = serialport::new(&path, cfg.baud_rate.unwrap_or(115200))
         .data_bits(data_bits)
         .stop_bits(stop_bits)
         .parity(parity)
-        .flow_control(if cfg.rtscts.unwrap_or(false) {
-            serialport::FlowControl::Hardware
-        } else {
-            serialport::FlowControl::None
-        })
+        .flow_control(flow)
         .timeout(Duration::from_millis(50));
 
     let mut port = match builder.open() {
@@ -534,7 +567,8 @@ fn open_serial(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> O
 
     let stop = Arc::new(AtomicBool::new(false));
     let rec = state.recorder.clone();
-    spawn_reader(app, stop.clone(), rec, move |buf| {
+    // 串口：read 超时会被映射成 Ok(0)，不代表断开，所以 eof_is_close = false
+    spawn_reader(app, stop.clone(), rec, false, move |buf| {
         match reader.read(buf) {
             Ok(0) => Ok(0),
             Ok(n) => Ok(n),
@@ -544,7 +578,7 @@ fn open_serial(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> O
     });
 
     let label = path.clone();
-    *state.active.lock().unwrap() = Some(Active { link: Link::Serial(port), stop });
+    *state.active.lock().unwrap() = Some(Active { link: Link::Serial(port), stop, closed: None });
     OpenResult::ok(label)
 }
 
@@ -585,22 +619,12 @@ fn open_tcp_client(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
     };
 
     let label = addr.clone();
-    let app2 = app.clone();
     let stop = Arc::new(AtomicBool::new(false));
     let rec = state.recorder.clone();
-    spawn_reader(app.clone(), stop.clone(), rec, move |buf| reader.read(buf));
+    // TCP：read 返回 0 就是对端关了连接（EOF），要通知前端，否则界面永远停在「已连接」
+    spawn_reader(app, stop.clone(), rec, true, move |buf| reader.read(buf));
 
-    // 连接断开时通知前端
-    let stop2 = stop.clone();
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_millis(300));
-        if stop2.load(Ordering::Relaxed) {
-            break;
-        }
-    });
-
-    *state.active.lock().unwrap() = Some(Active { link: Link::TcpClient(sock), stop });
-    let _ = app2.emit("link:ready", ());
+    *state.active.lock().unwrap() = Some(Active { link: Link::TcpClient(sock), stop, closed: None });
     OpenResult::ok(label)
 }
 
@@ -620,33 +644,41 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
         Ok(l) => l,
         Err(e) => return OpenResult::err(io_err_text(&e, bind_addr, port)),
     };
+    // 非阻塞 + 40ms 轮询：接受线程才能看到 stop 标志及时退出。
+    // 原先是阻塞在 incoming() 里，关掉链路后线程和端口都还活着，再侦听同一端口会报「已被占用」
+    if let Err(e) = listener.set_nonblocking(true) {
+        return OpenResult::err(io_err_text(&e, bind_addr, port));
+    }
 
     let label = format!("监听 {}", addr_str);
     let stop = Arc::new(AtomicBool::new(false));
     let client: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+    let gen: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 
-    // 接受连接的线程
+    // 接受连接的线程（监听 socket 的唯一所有者：它 drop 了端口才真正释放）
     let app2 = app.clone();
     let stop2 = stop.clone();
     let client2 = client.clone();
+    let gen2 = gen.clone();
     let rec2 = state.recorder.clone();
-    let listener2 = match listener.try_clone() {
-        Ok(l) => l,
-        Err(e) => return OpenResult::err(e.to_string()),
-    };
+    let (done_tx, done_rx) = mpsc::channel::<()>();
     thread::spawn(move || {
-        for stream in listener2.incoming() {
+        loop {
             if stop2.load(Ordering::Relaxed) {
                 break;
             }
-            match stream {
-                Ok(s) => {
+            match listener.accept() {
+                Ok((s, _)) => {
                     let _ = s.set_nodelay(true);
+                    // Windows 上 accept 出来的 socket 会继承监听 socket 的非阻塞模式，这里显式改回阻塞
+                    let _ = s.set_nonblocking(false);
                     let peer = s
                         .peer_addr()
                         .map(|a| a.to_string())
                         .unwrap_or_else(|_| "unknown".into());
-                    // 新客户端顶掉旧的
+                    // 新客户端顶掉旧的：代际 +1，旧客户端的读线程醒来一比对就知道自己过气了，
+                    // 不会再在新客户端刚接入后补一条「客户端已断开」
+                    let my_gen = gen2.fetch_add(1, Ordering::SeqCst) + 1;
                     if let Some(old) = client2.lock().unwrap().take() {
                         let _ = old.shutdown(std::net::Shutdown::Both);
                     }
@@ -660,6 +692,7 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
                     let stop3 = stop2.clone();
                     let app3 = app2.clone();
                     let rec3 = rec2.clone();
+                    let gen3 = gen2.clone();
                     thread::spawn(move || {
                         let mut buf = [0u8; 8192];
                         loop {
@@ -680,19 +713,33 @@ fn open_tcp_server(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) 
                                 Err(_) => break,
                             }
                         }
-                        let _ = app3.emit("link:peer", serde_json::json!({ "connected": false }));
+                        // 只有「我还是当前客户端」时才报断开：被顶掉 / 链路已关都不该再弹提示
+                        if gen3.load(Ordering::SeqCst) == my_gen {
+                            let _ = app3.emit("link:peer", serde_json::json!({ "connected": false }));
+                        }
                     });
                 }
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(40));
+                }
+                // 其它错误（比如临时性的网络栈错误）：慢一点重试，别空转
                 Err(_) => {
                     if stop2.load(Ordering::Relaxed) {
                         break;
                     }
+                    thread::sleep(Duration::from_millis(200));
                 }
             }
         }
+        drop(listener);
+        let _ = done_tx.send(());
     });
 
-    *state.active.lock().unwrap() = Some(Active { link: Link::TcpServer { listener, client }, stop });
+    *state.active.lock().unwrap() = Some(Active {
+        link: Link::TcpServer { client, gen },
+        stop,
+        closed: Some(done_rx),
+    });
     OpenResult::ok(label)
 }
 
@@ -744,17 +791,22 @@ fn open_udp(app: AppHandle, state: State<'_, AppState>, cfg: OpenConfig) -> Open
 
     let stop = Arc::new(AtomicBool::new(false));
     let rec = state.recorder.clone();
-    spawn_reader(app, stop.clone(), rec, move |buf| reader.recv(buf));
+    // UDP 没有「连接」概念，空数据报也不代表什么
+    spawn_reader(app, stop.clone(), rec, false, move |buf| reader.recv(buf));
 
-    *state.active.lock().unwrap() = Some(Active { link: Link::Udp { sock, remote }, stop });
+    *state.active.lock().unwrap() = Some(Active { link: Link::Udp { sock, remote }, stop, closed: None });
     OpenResult::ok(label)
 }
 
-/// 起一个读线程，循环把数据 emit 给前端
+/// 起一个读线程，循环把数据 emit 给前端。
+///
+/// `eof_is_close`：read 返回 0 算不算「对端断开」。TCP 为 true；串口读超时也会被映射成 0，
+/// UDP 收到空数据报也可能是 0，这两种都为 false。
 fn spawn_reader<F>(
     app: AppHandle,
     stop: Arc<AtomicBool>,
     rec: Arc<Mutex<Option<Recorder>>>,
+    eof_is_close: bool,
     mut read_fn: F,
 ) where
     F: FnMut(&mut [u8]) -> std::io::Result<usize> + Send + 'static,
@@ -766,7 +818,20 @@ fn spawn_reader<F>(
                 break;
             }
             match read_fn(&mut buf) {
-                Ok(0) => thread::sleep(Duration::from_millis(5)),
+                Ok(0) => {
+                    if eof_is_close {
+                        // 对端正常关闭（FIN）：原来这里只 sleep 5ms 然后继续读，
+                        // 永远读不到数据也永远不报断开，界面就一直写着「已连接」
+                        if !stop.load(Ordering::Relaxed) {
+                            let _ = app.emit(
+                                "link:closed",
+                                serde_json::json!({ "reason": "对端已关闭连接" }),
+                            );
+                        }
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(5));
+                }
                 Ok(n) => {
                     // 先落盘（长时记录模式下这是主通道），再推给前端旁路显示
                     if let Ok(mut g) = rec.lock() {
@@ -801,10 +866,15 @@ fn do_close(state: &State<'_, AppState>) {
             Link::TcpClient(s) => {
                 let _ = s.shutdown(std::net::Shutdown::Both);
             }
-            Link::TcpServer { listener, client } => {
-                drop(listener);
+            Link::TcpServer { client, gen } => {
+                // 代际 +1：当前客户端的读线程醒来后不会再发「客户端已断开」
+                gen.fetch_add(1, Ordering::SeqCst);
                 if let Some(c) = client.lock().unwrap().take() {
                     let _ = c.shutdown(std::net::Shutdown::Both);
+                }
+                // 等接受线程把监听 socket 真正 drop 掉（最多 1s），端口释放后函数才返回
+                if let Some(rx) = active.closed {
+                    let _ = rx.recv_timeout(Duration::from_millis(1000));
                 }
             }
             Link::Udp { sock, .. } => {
@@ -814,8 +884,11 @@ fn do_close(state: &State<'_, AppState>) {
     }
 }
 
-#[tauri::command]
+/// 关闭链路（同样挪出主线程：TCP Server 关闭要等接受线程释放端口）
+#[tauri::command(async)]
 fn close_link(state: State<'_, AppState>) -> bool {
+    // 先让还在握手的 open 过期，再关 —— 顺序反过来的话 open 可能在关完之后才写入 active
+    state.generation.fetch_add(1, Ordering::SeqCst);
     do_close(&state);
     true
 }
@@ -932,7 +1005,8 @@ pub struct RecordOptions {
     pub tz_offset_min: i64,
 }
 
-#[tauri::command]
+/// 开始记录要建目录 + 开文件（可能落在网络盘 / 移动硬盘上），别占着主线程
+#[tauri::command(async)]
 fn record_start(state: State<'_, AppState>, opts: RecordOptions) -> Result<RecordStats, String> {
     let mut g = state.recorder.lock().unwrap();
     if let Some(mut old) = g.take() {
@@ -951,7 +1025,7 @@ fn record_start(state: State<'_, AppState>, opts: RecordOptions) -> Result<Recor
     Ok(stats)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn record_stop(state: State<'_, AppState>) -> Option<RecordStats> {
     let mut g = state.recorder.lock().unwrap();
     if let Some(mut r) = g.take() {
@@ -963,7 +1037,7 @@ fn record_stop(state: State<'_, AppState>) -> Option<RecordStats> {
     None
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn record_status(state: State<'_, AppState>) -> Option<RecordStats> {
     let g = state.recorder.lock().unwrap();
     g.as_ref().map(|r| r.stats())
@@ -1045,12 +1119,6 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-/// 让未使用的 import 不报警（Ipv4Addr 在部分平台用不到）
-#[allow(dead_code)]
-fn _unused() -> Ipv4Addr {
-    Ipv4Addr::UNSPECIFIED
 }
 
 // ==========================================================================
@@ -1189,14 +1257,56 @@ mod tests {
         assert!(p > 0, "填 0 应由系统分配到一个真实端口");
     }
 
-    /// 本机 IP 列表不应包含回环地址，且不应 panic
+    /// 本机 IP 列表不应包含回环地址 / IPv6，且不应 panic
     #[test]
-    fn local_ips_excludes_loopback() {
+    fn local_ips_is_ipv4_only() {
         let ips = local_ips();
         for ip in &ips {
             assert!(!ip.starts_with("127."), "不应把回环地址列出来: {}", ip);
+            assert!(!ip.contains(':'), "只应列 IPv4，前端绑定地址不认 IPv6: {}", ip);
         }
         println!("本机 IPv4: {:?}", ips);
+    }
+
+    /// TCP Server 关闭后端口必须真正释放。
+    ///
+    /// 原先接受线程阻塞在 incoming() 里，手里还攥着 listener 的克隆 ——
+    /// do_close 只 drop 掉自己那一份，socket 要到最后一个句柄关闭才释放，
+    /// 结果线程泄漏 + 端口一直被占，再侦听同一端口直接报「已被占用」。
+    /// 现在接受线程是唯一所有者（非阻塞轮询），退出时 drop 并通知。
+    #[test]
+    fn tcp_server_close_releases_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("绑定随机端口应成功");
+        let port = listener.local_addr().unwrap().port();
+        listener.set_nonblocking(true).expect("设非阻塞应成功");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel::<()>();
+        let stop2 = stop.clone();
+        let t = thread::spawn(move || {
+            loop {
+                if stop2.load(Ordering::Relaxed) {
+                    break;
+                }
+                match listener.accept() {
+                    Ok(_) => {}
+                    Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => thread::sleep(Duration::from_millis(50)),
+                }
+            }
+            drop(listener);
+            let _ = tx.send(());
+        });
+
+        // 关闭：置位 stop，然后像 do_close 一样等线程说「端口放开了」
+        stop.store(true, Ordering::Relaxed);
+        rx.recv_timeout(Duration::from_secs(2)).expect("接受线程应在 2s 内退出");
+        t.join().unwrap();
+
+        let again = TcpListener::bind(("127.0.0.1", port));
+        assert!(again.is_ok(), "关闭后端口 {} 应已释放，实际: {:?}", port, again.err());
     }
     
     /// 记录器：写盘 + 超上限自动开新文件

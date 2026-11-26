@@ -72,6 +72,13 @@
       return invoke('save_file', { payload: payload });
     },
     appInfo: function () { return invoke('app_info'); },
-    localIPs: function () { return invoke('local_ips'); }
+    localIPs: function () { return invoke('local_ips'); },
+
+    /* ---------- 外部链接 ---------- */
+    /* WebView2 里 <a target="_blank"> 的弹窗请求会被 wry 直接吞掉（点了没反应），
+       要交给系统浏览器得走 opener 插件（capabilities 里已放开 opener:allow-open-url） */
+    openUrl: function (url) {
+      return invoke('plugin:opener|open_url', { url: String(url) });
+    }
   };
 })();

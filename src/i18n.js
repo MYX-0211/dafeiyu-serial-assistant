@@ -35,7 +35,7 @@ const I18N = {
     'tip.help': '使用说明',
 
     'db.8': '8 位', 'db.7': '7 位', 'db.6': '6 位', 'db.5': '5 位',
-    'sb.1': '1 位', 'sb.1.5': '1.5 位', 'sb.2': '2 位',
+    'sb.1': '1 位', 'sb.2': '2 位',
     'parity.none': '无校验', 'parity.even': '偶校验', 'parity.odd': '奇校验',
     'flow.none': '无流控', 'flow.rtscts': 'RTS/CTS', 'flow.xonxoff': 'XON/XOFF',
     'net.remote': '远程', 'net.local': '本地', 'net.allIf': '全部网卡',
@@ -285,7 +285,7 @@ const I18N = {
     'tip.help': 'Help',
 
     'db.8': '8 bit', 'db.7': '7 bit', 'db.6': '6 bit', 'db.5': '5 bit',
-    'sb.1': '1 bit', 'sb.1.5': '1.5 bit', 'sb.2': '2 bit',
+    'sb.1': '1 bit', 'sb.2': '2 bit',
     'parity.none': 'None', 'parity.even': 'Even', 'parity.odd': 'Odd',
     'flow.none': 'None', 'flow.rtscts': 'RTS/CTS', 'flow.xonxoff': 'XON/XOFF',
     'net.remote': 'Remote', 'net.local': 'Local', 'net.allIf': 'All interfaces',

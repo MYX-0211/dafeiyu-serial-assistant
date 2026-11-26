@@ -8,12 +8,12 @@
 
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.99-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Size](https://img.shields.io/badge/Size-3.9%20MB-brightgreen)](#体积与内存)
+[![Size](https://img.shields.io/badge/Size-3.8%20MB-brightgreen)](#体积与内存)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](#)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](#许可--license)
 [![Author](https://img.shields.io/badge/Author-MYX-blue)](https://github.com/MYX-0211)
 
-单文件 exe，**3.9 MB**，双击即用。
+单文件 exe，**3.8 MB**，双击即用。
 
 </div>
 
@@ -26,13 +26,13 @@
 
 | 指标 | Electron 版 | **Tauri 版** | 改善 |
 | :--- | ---: | ---: | ---: |
-| exe 体积 | 89.2 MB | **3.9 MB** | **↓ 23 倍** |
+| exe 体积 | 89.2 MB | **3.8 MB** | **↓ 23 倍** |
 | 进程数 | 4 | **1** | — |
 | 内存占用 | 344 MB | **35 MB** | **↓ 10 倍** |
 | 冷启动 | ~2 s | **~0.4 s** | **↓ 5 倍** |
 
 **为什么能小这么多**：Electron 把整个 Chromium 打进安装包；Tauri 直接调用**系统自带的 WebView2** 渲染界面，
-exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 89 MB 一个 3.9 MB。
+exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 89 MB 一个 3.8 MB。
 
 > 代价：Windows 10/11 需要 WebView2 运行时（Win11 和打过补丁的 Win10 都自带；
 > 极老的系统需要单独装一次）。
@@ -56,7 +56,7 @@ exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 
 可设保存目录、文件名前缀、**分文件大小**（写满自动开下一个）、**每行前加本地时间戳**。
 状态栏会实时显示当前文件名和已写字节。
 
-**曲线**（v2.1 新增）：接收区可切「文本 / 曲线」视图，自动从每行提取  画曲线（最多 6 条）。
+**曲线**（v2.1 新增）：接收区可切「文本 / 曲线」视图，自动从每行提取 `name=123` 这种键值对画曲线（最多 6 条）。
 切到曲线视图时文本不再堆 DOM，两边不会同时吃内存。
 
 **发送**：HEX·ASCII / 新行 CRLF·LF·CR / 定时发送 / 追加校验（CRC16·CCITT·ADD8·XOR8）/
@@ -68,9 +68,23 @@ exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 
 
 ## 快速开始
 
-1. 从 [Releases](../../releases) 下载 `DaFeiYu-v2.1.7.exe`
+1. 从 [Releases](../../releases) 下载 `DaFeiYu-v2.1.8.exe`
 2. 双击运行 —— **真的免安装**，不需要解压、不需要等
 3. 顶部下拉框选模式，点「打开 / 连接 / 侦听」
+
+## 最近更新（v2.1.8）
+
+- **新图标**：换成了新的看板娘立绘（透明底，深浅任务栏都干净）。
+- **修复「曲线」视图画不出线**：`ChartView.feed` 之前从未被调用，切到曲线只能看到提示语。现在按行喂数，跨 chunk 的半行会先拼回来。
+- **修复 TCP Client 对端断开后界面仍显示「已连接」**：`read` 返回 0（EOF）原来只是 sleep 5ms 继续读，现在会推 `link:closed`。
+- **修复 TCP Server 关闭后端口仍被占用**：接受线程原先阻塞在 `incoming()` 且持有 listener 克隆，`do_close` 只释放了自己那份，线程泄漏、端口不释放。现在接受线程非阻塞轮询，关闭时等它真正 drop 再返回。
+- **修复 TCP Server 新客户端接入后误报「客户端已断开」**：给每个客户端加代际号，被顶掉的旧读线程不再发断开事件。
+- **连接 / 枚举 / 记录不再卡界面**：Tauri 里不带 `async` 的命令跑在主线程，`connect_timeout` 最长 8 秒会让整窗白屏。`open_link / close_link / list_ports / record_*` 改为 `#[tauri::command(async)]`；打开过程中点取消会按代际号作废。
+- **XON/XOFF 流控终于生效**：之前前端传了 `xon` 但后端没读，选了等于没选。
+- **去掉后端不支持的选项**：停止位 1.5、校验位 Mark / Space（serialport 库不支持，原先会被静默当成 1 位 / 无校验）。
+- **软件信息不再显示 `Electron undefined`**：关于页 toast 原来按 Electron 字段拼接。
+- **关于页的 GitHub 链接可以点了**：WebView2 会吞掉 `target=_blank`，现在走 opener 插件交给系统浏览器。
+- 「本地」地址下拉只列 IPv4（双栈机器上 `local_ip()` 可能先给 IPv6）。
 
 ## 快捷键
 
@@ -97,7 +111,7 @@ exe 里只剩 Rust 编译出来的业务逻辑。同样的界面代码，一个 
 git clone https://github.com/MYX-0211/dafeiyu-serial-assistant.git
 cd dafeiyu-serial-assistant/src-tauri
 
-cargo test --release        # 跑单元测试（9 个）
+cargo test --release        # 跑单元测试（14 个）
 cargo build --release       # 产物：target/release/dafeiyu-serial-assistant.exe
 ```
 
@@ -153,7 +167,7 @@ panic = "abort"      # 去掉 unwind 表
 strip = true         # 去掉符号
 ```
 
-加上 `lib.rs` 里手动实现二进制解析、不用重型依赖，最终 3.9 MB。
+加上 `lib.rs` 里手动实现二进制解析、不用重型依赖，最终 3.8 MB。
 
 ## 许可 / License
 
@@ -174,7 +188,7 @@ This started as an Electron app: 89 MB exe, 344 MB RAM. After rewriting the back
 
 | | Electron | **Tauri** |
 | :--- | ---: | ---: |
-| exe size | 89.2 MB | **3.9 MB** |
+| exe size | 89.2 MB | **3.8 MB** |
 | Processes | 4 | **1** |
 | RAM | 344 MB | **35 MB** |
 
@@ -210,9 +224,22 @@ so the two never fight over memory.
 
 ## Quick start
 
-1. Download `DaFeiYu-v2.1.7.exe` from [Releases](../../releases)
+1. Download `DaFeiYu-v2.1.8.exe` from [Releases](../../releases)
 2. Double-click — genuinely portable, no install, no extraction wait
 3. Pick a mode, hit **Open / Connect / Listen**
+
+## What's new in v2.1.8
+
+- **New app icon** (transparent background, clean on both light and dark taskbars).
+- **Chart view now actually plots**: `ChartView.feed` was never called; lines are now fed per line, with cross-chunk halves reassembled.
+- **TCP Client detects remote close**: `read` returning 0 (EOF) used to just sleep and retry; now it emits `link:closed`.
+- **TCP Server frees its port on close**: the accept thread used to block in `incoming()` holding a listener clone, leaking the thread and the port. It now polls non-blocking and `do_close` waits for it to drop the socket.
+- **No more stale "client disconnected" after a new client connects** (per-client generation counter).
+- **Open / close / port scan / recording no longer run on the UI thread**: plain `#[tauri::command]`s run on the main thread in Tauri, so an 8-second `connect_timeout` froze the window. They are now `#[tauri::command(async)]`, and a cancelled open is discarded via a generation counter.
+- **XON/XOFF flow control now works** (the backend never read the `xon` flag).
+- **Removed options the backend can't honour**: 1.5 stop bits and Mark/Space parity (unsupported by the serialport crate; silently downgraded before).
+- **"About" no longer shows `Electron undefined`**, and the GitHub link opens in the system browser via the opener plugin.
+- The local-address dropdown only lists IPv4.
 
 ## Build from source
 
@@ -222,7 +249,7 @@ Requires the **Rust toolchain**, an **MSVC linker**, and the **WebView2 runtime*
 git clone https://github.com/MYX-0211/dafeiyu-serial-assistant.git
 cd dafeiyu-serial-assistant/src-tauri
 
-cargo test --release        # 9 unit tests
+cargo test --release        # 14 unit tests
 cargo build --release       # output: target/release/dafeiyu-serial-assistant.exe
 ```
 

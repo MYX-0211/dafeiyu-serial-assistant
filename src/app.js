@@ -97,6 +97,8 @@ const S = {
 
   /* 接收区视图：text | chart */
   rxView: 'text',
+  /* 曲线视图下攒半行用：一行可能跨多个 chunk，凑齐换行再喂给曲线 */
+  chartBuf: '',
   /* 长时记录 */
   recording: false,
   recDir: '',
@@ -255,6 +257,7 @@ function clearLog() {
   logEl.innerHTML = '';
   S.buf.length = 0;
   S.logBytes = 0; S.lineEnded = false;
+  S.chartBuf = '';
   /* 曲线数据一并清掉，否则点了「清空」曲线还留着旧波形，会误导 */
   if (window.ChartView) ChartView.clear();
   $('rxBadge').textContent = t('rx.lines', { n: 0 });
@@ -264,6 +267,22 @@ function clearLog() {
 /* ==========================================================================
    5. 接收
    ========================================================================== */
+/* 曲线视图：按行喂给 ChartView。
+   原先 ChartView.feed 从来没有被调用过 —— 切到「曲线」只会看到一句提示，
+   永远画不出线；而且 flushLog 在曲线视图下会把文本缓冲整个丢掉。 */
+function feedChart(text) {
+  if (!window.ChartView) return;
+  S.chartBuf += text;
+  let nl;
+  while ((nl = S.chartBuf.search(/[\r\n]/)) >= 0) {
+    const line = S.chartBuf.slice(0, nl);
+    S.chartBuf = S.chartBuf.slice(nl + 1);
+    if (line) ChartView.feed(line);
+  }
+  /* 一直不来换行的流别无限攒 */
+  if (S.chartBuf.length > 65536) S.chartBuf = S.chartBuf.slice(-65536);
+}
+
 function onRxChunk(u8) {
   S.rxBytes += u8.length;
 
@@ -278,15 +297,22 @@ function onRxChunk(u8) {
   if (S.hexView) {
     queueLog(bytesToHex(u8), 'rx', brk || S.lineEnded);
     S.lineEnded = false;
-  } else {
-    const text = rxDec.decode(u8, { stream: true });
-    if (!text.length) { updateStats(); return; }
-    const safe = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '\u00b7');
-    const first = brk || S.lineEnded;
-    S.lineEnded = false;
-    const pieces = piecesOf(safe, first);
-    for (let i = 0; i < pieces.length; i++) queueLog(pieces[i].text, 'rx', pieces[i].brk);
+    updateStats();
+    return;
   }
+  /* 流式解码只能对每个 chunk 调一次，文本 / 曲线两条路共用这一份结果 */
+  const text = rxDec.decode(u8, { stream: true });
+  if (!text.length) { updateStats(); return; }
+  if (S.rxView === 'chart') {
+    feedChart(text);
+    updateStats();
+    return;
+  }
+  const safe = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '\u00b7');
+  const first = brk || S.lineEnded;
+  S.lineEnded = false;
+  const pieces = piecesOf(safe, first);
+  for (let i = 0; i < pieces.length; i++) queueLog(pieces[i].text, 'rx', pieces[i].brk);
   updateStats();
 }
 function onTxEcho(u8) {
@@ -512,6 +538,9 @@ async function openLink() {
     r = await withTimeout(NATIVE.open(cfg), 15000, t('toast.opening'));
   } catch (e) {
     r = { ok: false, error: (e && e.message) || String(e) };
+    /* 超时 / 异常时后端那边可能还在握手：调一次 close 让这次 open 过期
+       （后端用代际号判断），免得它几秒后悄悄连上而界面已经显示失败 */
+    if (NATIVE.close) { try { await withTimeout(NATIVE.close(), 5000, 'close'); } catch (_) { } }
   } finally {
     /* 无论成功、失败还是异常，这里都必须复位，否则按钮会永远卡在「打开中」 */
     S.opening = false;
@@ -625,6 +654,7 @@ function flashLinkError(msg) {
 function setConnectedUI(on) {
   /* 未连接时状态栏留空：顶部徽章已经写了「未连接」，这里只放链路详情，不重复 */
   $('sbPort').textContent = on ? (S.openLabel || '') : '';
+  if (!on) S.chartBuf = '';   /* 断开后曲线的半行缓冲作废，别和下一条链路的数据拼一起 */
   setLinkState(on ? (S.paused ? 'paused' : 'open') : 'idle');
   $('btnOpenText').textContent = on ? modeWord().on : modeWord().off;
   ['modeSel', 'btnRefresh', 'btnBaud', 'baudRate', 'dataBits', 'stopBits', 'parity', 'flowCtrl',
@@ -1077,6 +1107,7 @@ function bindAll() {
     setEncoding(this.value);
     rxDec = new TextDecoder(S.encoding, { fatal: false });
     echoDec = new TextDecoder(S.encoding, { fatal: false });
+    S.chartBuf = '';
     toast(this.value === 'gbk' ? t('toast.encGbk') : t('toast.encUtf8'));
   });
 
@@ -1371,9 +1402,26 @@ function bindAll() {
   });
 
   /* ---------- 关于 ---------- */
-  $('btnAbout').addEventListener('click', function () { openModal($('aboutModal')); });
+  $('btnAbout').addEventListener('click', function () {
+    openModal($('aboutModal'));
+    /* 版本号在 init 里已经写进 #aboutVer；这里顺手把运行环境也提示一下
+       （原来这里按 Electron 的字段拼 toast，Tauri 的 appInfo 没有 electron/chrome/node，显示的是一串 undefined） */
+    if (!NATIVE) return;
+    NATIVE.appInfo().then(function (i) {
+      toast('v' + i.version + ' · ' + i.platform + ' · ' + i.arch, 'info', 4200);
+    }).catch(function () { });
+  });
   $('btnAboutClose').addEventListener('click', function () { closeModal($('aboutModal')); });
   $('aboutModal').addEventListener('click', function (e) { if (e.target === this) closeModal(this); });
+  /* 开源地址：WebView2 会把 target=_blank 的新窗口请求直接吞掉，必须交给系统浏览器 */
+  Array.prototype.forEach.call(document.querySelectorAll('#aboutModal a[href]'), function (a) {
+    a.addEventListener('click', function (e) {
+      const href = a.getAttribute('href');
+      if (!href || !NATIVE || !NATIVE.openUrl) return;   /* 非 Tauri 环境（浏览器里调试）保持默认行为 */
+      e.preventDefault();
+      NATIVE.openUrl(href).catch(function () { });
+    });
+  });
 
   /* ---------- 背景浓度：淡 → 浓 → 关 循环 ----------
      背景图透多少属于口味，写死总有人不满意，所以给个三档开关。 */
@@ -1397,11 +1445,6 @@ function bindAll() {
   $('btnHelp').addEventListener('click', function () { openModal($('helpModal')); });
   $('btnHelpClose').addEventListener('click', function () { closeModal($('helpModal')); });
   $('btnHelpOk').addEventListener('click', function () { closeModal($('helpModal')); });
-  $('btnAbout').addEventListener('click', async function () {
-    if (!NATIVE) return;
-    const i = await NATIVE.appInfo();
-    toast('Electron ' + i.electron + ' · Chromium ' + i.chrome + ' · Node ' + i.node + ' · ' + i.arch, 'info', 6000);
-  });
   $('helpModal').addEventListener('click', function (e) { if (e.target === this) closeModal(this); });
 
   /* ---------- 发送区高度拖拽 ---------- */
@@ -1530,7 +1573,6 @@ async function init() {
     try { S.localIPs = await NATIVE.localIPs(); } catch (_) { }
   }
 
-  S.localIPs = (NATIVE ? [] : []);
   await refreshLocalIPs();
 
   const savedEnc = LS.get('serialstudio.encoding', 'utf-8');
